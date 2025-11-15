@@ -16,7 +16,41 @@ public struct Location has store {
     location_hash: vector<u8>, //TODO: do a wrapper for custom hash for type safety later
 }
 
+// proof message
+// public struct Proof {
+//     committment: vector // Poseidon2 hash of the location. Not used now but in future can be replaced with a zk proof https://docs.sui.io/references/framework/sui_sui/poseidon
+//     custom_message: String ? "eg: The server attests that this structure is in proximity"
+//     proof_deadline: timestamp
+//     distance: u64 // optional
+//     signature: vector // Trusted server signature is the actual proof
+// }
+
+// Should we have a custom message struct instead for signing : or is this a overkill ?
+// So that the message is constructed in this format signed and send.
+// During verify if the distance is provided then its hashed with the distance during verify_signature else leave empty
+// the verify_signature can extract the from address from the Message and verify against the signature public key
+// public struct Proof {
+//     committment: vector // Poseidon2 hash of the location. Not used now but in future can be replaced with a zk proof https://docs.sui.io/references/framework/sui_sui/poseidon
+//     custom_message: Message ? "eg: The server attests that this structure is in proximity"
+//     proof_deadline: timestamp
+//     distance: u64 // optional , it can be 0 if there is no distance
+//     signature: vector // Trusted server signature is the actual proof
+// }
+// public struct Message {
+//     from: address //admin address
+//     message: String
+//     distance: u64
+// }
+
 // === Public Functions ===
+
+// Rewrite the functions.
+// A function to verify both strucutres are in same location
+// this is only used for ephemeral storage
+
+// A function to verify in_proximity using the sig_verify::verify_signature(message, timestamp, signature, admin_address)
+// This function input is Proof and return value is bool
+// deconstruct the proof, get the Message. append from, message and distance and send is as message in bytes to sig_verify::verify_signature
 
 // TODO: Should we also add distance param ?
 /// Verifies if the locations are in proximity.

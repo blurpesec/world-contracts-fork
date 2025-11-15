@@ -142,6 +142,8 @@ public fun game_to_chain_inventory(
         )
 }
 
+// TODO: add chain to game function
+
 public fun deposit_item<Auth: drop>(
     storage_unit: &mut StorageUnit,
     _: Auth,

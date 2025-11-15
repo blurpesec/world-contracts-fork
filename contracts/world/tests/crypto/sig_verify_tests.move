@@ -1,7 +1,7 @@
 #[test_only]
 module world::sig_verify_tests;
 
-use sui::{clock::{Self, Clock}, test_scenario as ts};
+use sui::{clock::{Self}, test_scenario as ts};
 use world::sig_verify;
 
 #[test]
