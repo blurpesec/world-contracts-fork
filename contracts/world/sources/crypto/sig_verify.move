@@ -40,20 +40,6 @@ const ED25519_FLAG: u8 = 0x00;
 const ED25519_SIG_LEN: u64 = 64;
 const ED25519_PK_LEN: u64 = 32;
 
-/// Extracts a slice of bytes from a vector within the specified range [start, end).
-///
-/// # Returns
-/// A new vector containing the bytes from `start` to `end - 1`
-fun extract_bytes(source: &vector<u8>, start: u64, end: u64): vector<u8> {
-    let mut result = vector::empty<u8>();
-    let mut i = start;
-    while (i < end) {
-        result.push_back(*vector::borrow(source, i));
-        i = i + 1;
-    };
-    result
-}
-
 public fun derive_address_from_public_key(public_key: vector<u8>): address {
     assert!(public_key.length() == ED25519_PK_LEN, EInvalidPublicKeyLen);
 
@@ -122,4 +108,20 @@ public fun verify_signature_with_deadline(
     let current_time_ms = clock.timestamp_ms();
     assert!(current_time_ms <= deadline_ms, ESignatureExpired);
     verify_signature(message, signature, expected_address)
+}
+
+// === Private Functions ===
+
+/// Extracts a slice of bytes from a vector within the specified range [start, end).
+///
+/// # Returns
+/// A new vector containing the bytes from `start` to `end - 1`
+fun extract_bytes(source: &vector<u8>, start: u64, end: u64): vector<u8> {
+    let mut result = vector::empty<u8>();
+    let mut i = start;
+    while (i < end) {
+        result.push_back(*vector::borrow(source, i));
+        i = i + 1;
+    };
+    result
 }

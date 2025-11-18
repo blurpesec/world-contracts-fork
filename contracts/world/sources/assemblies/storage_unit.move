@@ -58,7 +58,14 @@ public struct StorageUnitCreatedEvent has copy, drop {
     status: Status,
 }
 
+// === Public Functions ===
+public fun authorize_extension<Auth: drop>(storage_unit: &mut StorageUnit, owner_cap: &OwnerCap) {
+    assert!(authority::is_authorized(owner_cap, object::id(storage_unit)), EAccessNotAuthorized);
+    storage_unit.extension.swap_or_fill(type_name::with_defining_ids<Auth>());
+}
+
 // === View Functions ===
+
 public fun status(storage_unit: &StorageUnit): &AssemblyStatus {
     &storage_unit.status
 }
@@ -69,12 +76,6 @@ public fun location(storage_unit: &StorageUnit): &Location {
 
 public fun inventory(storage_unit: &StorageUnit): &Inventory {
     &storage_unit.inventory
-}
-
-// === Public Functions ===
-public fun authorize_extension<Auth: drop>(storage_unit: &mut StorageUnit, owner_cap: &OwnerCap) {
-    assert!(authority::is_authorized(owner_cap, object::id(storage_unit)), EAccessNotAuthorized);
-    storage_unit.extension.swap_or_fill(type_name::with_defining_ids<Auth>());
 }
 
 // === Admin Functions ===

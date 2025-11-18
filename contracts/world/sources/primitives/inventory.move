@@ -99,15 +99,7 @@ public struct ItemWithdrawnEvent has copy, drop {
     quantity: u32,
 }
 
-// === View Functions ===
-// Helpful for wrapper functions
-public fun contains_item(inventory: &Inventory, item_id: u64): bool {
-    inventory.items.contains(&item_id)
-}
-
-public fun get_item_location_hash(item: &Item): vector<u8> {
-    item.location.hash()
-}
+// === Public Functions ===
 
 public fun burn_items_with_proof(
     inventory: &mut Inventory,
@@ -123,6 +115,16 @@ public fun burn_items_with_proof(
 ) {
     location::verify_location_proof_as_bytes(location, location_proof, server_registry, clock, ctx);
     burn_items(inventory, assembly_status, owner_cap, item_id, quantity);
+}
+
+// === View Functions ===
+
+public fun contains_item(inventory: &Inventory, item_id: u64): bool {
+    inventory.items.contains(&item_id)
+}
+
+public fun get_item_location_hash(item: &Item): vector<u8> {
+    item.location.hash()
 }
 
 // === Admin Functions ===

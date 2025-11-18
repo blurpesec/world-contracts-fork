@@ -35,20 +35,8 @@ public struct StatusChangedEvent has copy, drop {
     status: Status,
 }
 
-// === View Functions ===
-public fun status(assembly_status: &AssemblyStatus): Status {
-    assembly_status.status
-}
-
-public fun assembly_id(assembly_status: &AssemblyStatus): ID {
-    assembly_status.assembly_id
-}
-
-public fun is_online(assembly_status: &AssemblyStatus): bool {
-    assembly_status.status == Status::ONLINE
-}
-
 // === Public Functions ===
+
 /// Online an assembly
 public fun online(assembly_status: &mut AssemblyStatus, owner_cap: &OwnerCap) {
     assert!(assembly_status.status == Status::ANCHORED, EAssemblyInvalidStatus);
@@ -78,6 +66,20 @@ public fun offline(assembly_status: &mut AssemblyStatus, owner_cap: &OwnerCap) {
         assembly_id: assembly_status.assembly_id,
         status: assembly_status.status,
     });
+}
+
+// === View Functions ===
+
+public fun status(assembly_status: &AssemblyStatus): Status {
+    assembly_status.status
+}
+
+public fun assembly_id(assembly_status: &AssemblyStatus): ID {
+    assembly_status.assembly_id
+}
+
+public fun is_online(assembly_status: &AssemblyStatus): bool {
+    assembly_status.status == Status::ONLINE
 }
 
 // === Package Functions ===
