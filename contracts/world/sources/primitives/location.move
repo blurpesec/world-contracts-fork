@@ -161,6 +161,12 @@ public fun verify_same_location(location_a_hash: vector<u8>, location_b_hash: ve
     assert!(location_a_hash == location_b_hash, ENotInProximity);
 }
 
+// === View Functions ===
+
+public fun hash(location: &Location): vector<u8> {
+    location.location_hash
+}
+
 // === Admin Functions ===
 
 public fun update_location(
@@ -239,12 +245,6 @@ fun unpack_proof(proof_bytes: vector<u8>): (LocationProofMessage, vector<u8>) {
         deadline_ms,
     };
     (message, signature)
-}
-
-// === View Functions ===
-
-public fun get_location_hash(location: &Location): vector<u8> {
-    location.location_hash
 }
 
 // === Test Functions ===

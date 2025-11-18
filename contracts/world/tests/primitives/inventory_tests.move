@@ -92,7 +92,7 @@ fun create_assembly_with_inventory() {
     {
         let storage_unit = ts::take_shared<StorageUnit>(&ts);
         assert_eq!(storage_unit.status.status_to_u8(), 0);
-        assert_eq!(storage_unit.location.get_location_hash(), LOCATION_A_HASH);
+        assert_eq!(storage_unit.location.hash(), LOCATION_A_HASH);
         assert_eq!(storage_unit.inventory.max_capacity(), MAX_CAPACITY);
         assert_eq!(storage_unit.inventory.used_capacity(), 0);
         ts::return_shared(storage_unit);
@@ -117,9 +117,9 @@ fun mint_items() {
 
         assert_eq!(storage_unit.inventory.used_capacity(), used_capacity);
         assert_eq!(storage_unit.inventory.remaining_capacity(), 0);
-        assert_eq!(storage_unit.inventory.get_item_quantity(AMMO_ITEM_ID), 10);
-        assert_eq!(storage_unit.inventory.get_inventory_item_length(), 1);
-        assert_eq!(storage_unit.location.get_location_hash(), LOCATION_A_HASH);
+        assert_eq!(storage_unit.inventory.item_quantity(AMMO_ITEM_ID), 10);
+        assert_eq!(storage_unit.inventory.inventory_item_length(), 1);
+        assert_eq!(storage_unit.location.hash(), LOCATION_A_HASH);
         ts::return_shared(storage_unit);
     };
     ts::end(ts);
@@ -156,8 +156,8 @@ fun mint_items_increases_quantity_when_exists() {
 
         assert_eq!(inv_ref.used_capacity(), used_capacity);
         assert_eq!(inv_ref.remaining_capacity(), MAX_CAPACITY - used_capacity);
-        assert_eq!(inv_ref.get_item_quantity(AMMO_ITEM_ID), 5);
-        assert_eq!(inv_ref.get_inventory_item_length(), 1);
+        assert_eq!(inv_ref.item_quantity(AMMO_ITEM_ID), 5);
+        assert_eq!(inv_ref.inventory_item_length(), 1);
         ts::return_shared(storage_unit);
         ts::return_to_sender(&ts, admin_cap);
     };
@@ -182,9 +182,9 @@ fun mint_items_increases_quantity_when_exists() {
         let inv_ref = &storage_unit.inventory;
         assert_eq!(inv_ref.used_capacity(), MAX_CAPACITY);
         assert_eq!(inv_ref.remaining_capacity(), 0);
-        assert_eq!(inv_ref.get_item_quantity(AMMO_ITEM_ID), 10);
-        assert_eq!(inv_ref.get_inventory_item_length(), 1);
-        assert_eq!(inv_ref.get_item_location(AMMO_ITEM_ID), LOCATION_A_HASH);
+        assert_eq!(inv_ref.item_quantity(AMMO_ITEM_ID), 10);
+        assert_eq!(inv_ref.inventory_item_length(), 1);
+        assert_eq!(inv_ref.item_location(AMMO_ITEM_ID), LOCATION_A_HASH);
         ts::return_shared(storage_unit);
         ts::return_to_sender(&ts, admin_cap);
     };
@@ -219,10 +219,10 @@ public fun burn_items() {
         let inv_ref = &storage_unit.inventory;
         assert_eq!(inv_ref.used_capacity(), 0);
         assert_eq!(inv_ref.remaining_capacity(), MAX_CAPACITY);
-        assert_eq!(inv_ref.get_inventory_item_length(), 0);
+        assert_eq!(inv_ref.inventory_item_length(), 0);
 
         let location_ref = &storage_unit.location;
-        assert_eq!(location_ref.get_location_hash(), LOCATION_A_HASH);
+        assert_eq!(location_ref.hash(), LOCATION_A_HASH);
 
         ts::return_shared(storage_unit);
         ts::return_to_sender(&ts, owner_cap);
@@ -258,7 +258,7 @@ public fun burn_partial_items() {
         let used_capacity = 5 * AMMO_VOLUME;
         assert_eq!(inv_ref.used_capacity(), used_capacity);
         assert_eq!(inv_ref.remaining_capacity(), MAX_CAPACITY - used_capacity);
-        assert_eq!(inv_ref.get_inventory_item_length(), 1);
+        assert_eq!(inv_ref.inventory_item_length(), 1);
 
         ts::return_shared(storage_unit);
         ts::return_to_sender(&ts, owner_cap);
@@ -296,7 +296,7 @@ public fun deposit_items() {
         let inv_ref = &ephemeral_storage_unit.inventory;
         assert_eq!(inv_ref.used_capacity(), 0);
         assert_eq!(inv_ref.remaining_capacity(), MAX_CAPACITY);
-        assert_eq!(inv_ref.get_inventory_item_length(), 0);
+        assert_eq!(inv_ref.inventory_item_length(), 0);
 
         ts::return_shared(ephemeral_storage_unit);
         ts::return_to_sender(&ts, owner_cap);
@@ -314,7 +314,7 @@ public fun deposit_items() {
         let inv_ref = &storage_unit.inventory;
         assert_eq!(inv_ref.used_capacity(), 0);
         assert_eq!(inv_ref.remaining_capacity(), MAX_CAPACITY);
-        assert_eq!(inv_ref.get_inventory_item_length(), 0);
+        assert_eq!(inv_ref.inventory_item_length(), 0);
 
         let mut ephemeral_storage_unit = ts::take_shared_by_id<StorageUnit>(
             &ts,
@@ -326,7 +326,7 @@ public fun deposit_items() {
         let used_capacity = (AMMO_QUANTITY as u64) * AMMO_VOLUME;
         assert_eq!(eph_inv_ref.used_capacity(), used_capacity);
         assert_eq!(eph_inv_ref.remaining_capacity(), MAX_CAPACITY - used_capacity);
-        assert_eq!(eph_inv_ref.get_inventory_item_length(), 1);
+        assert_eq!(eph_inv_ref.inventory_item_length(), 1);
 
         ts::return_shared(storage_unit);
         ts::return_shared(ephemeral_storage_unit);
@@ -414,10 +414,10 @@ fun burn_items_with_proof() {
         let inv_ref = &storage_unit.inventory;
         assert_eq!(inv_ref.used_capacity(), 0);
         assert_eq!(inv_ref.remaining_capacity(), MAX_CAPACITY);
-        assert_eq!(inv_ref.get_inventory_item_length(), 0);
+        assert_eq!(inv_ref.inventory_item_length(), 0);
 
         let location_ref = &storage_unit.location;
-        assert_eq!(location_ref.get_location_hash(), test_helpers::get_verified_location_hash());
+        assert_eq!(location_ref.hash(), test_helpers::get_verified_location_hash());
 
         ts::return_shared(storage_unit);
         ts::return_to_sender(&ts, owner_cap);

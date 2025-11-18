@@ -95,7 +95,7 @@ fun online_storage_unit(ts: &mut ts::Scenario, user: address, storage_id: ID) {
         let owner_cap = ts::take_from_sender<OwnerCap>(ts);
         storage_unit.online(&owner_cap);
 
-        let status = storage_unit.get_status();
+        let status = storage_unit.status();
         assert_eq!(status.status_to_u8(), 1);
         ts::return_shared(storage_unit);
         ts::return_to_sender(ts, owner_cap);
@@ -147,13 +147,13 @@ fun test_create_storage_unit() {
     ts::next_tx(&mut ts, admin());
     {
         let storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
-        let inv_ref = storage_unit.get_inventory();
-        let location_ref = storage_unit.get_location();
+        let inv_ref = storage_unit.inventory();
+        let location_ref = storage_unit.location();
 
         assert_eq!(inv_ref.used_capacity(), 0);
         assert_eq!(inv_ref.remaining_capacity(), MAX_CAPACITY);
-        assert_eq!(inv_ref.get_inventory_item_length(), 0);
-        assert_eq!(location_ref.get_location_hash(), LOCATION_A_HASH);
+        assert_eq!(inv_ref.inventory_item_length(), 0);
+        assert_eq!(location_ref.hash(), LOCATION_A_HASH);
         ts::return_shared(storage_unit);
     };
     ts::end(ts);
@@ -172,13 +172,13 @@ fun test_create_items_on_chain() {
     ts::next_tx(&mut ts, admin());
     {
         let storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
-        let inv_ref = storage_unit.get_inventory();
+        let inv_ref = storage_unit.inventory();
 
         let used_capacity = (AMMO_QUANTITY as u64 * AMMO_VOLUME);
         assert_eq!(inv_ref.used_capacity(), used_capacity);
         assert_eq!(inv_ref.remaining_capacity(), MAX_CAPACITY - used_capacity);
-        assert_eq!(inv_ref.get_item_quantity(AMMO_ITEM_ID), AMMO_QUANTITY);
-        assert_eq!(inv_ref.get_inventory_item_length(), 1);
+        assert_eq!(inv_ref.item_quantity(AMMO_ITEM_ID), AMMO_QUANTITY);
+        assert_eq!(inv_ref.inventory_item_length(), 1);
         ts::return_shared(storage_unit);
     };
     ts::end(ts);
@@ -245,7 +245,7 @@ fun test_deposit_and_withdraw_via_extension() {
             item,
             ts.ctx(),
         );
-        assert_eq!(storage_unit.get_item_quantity(AMMO_ITEM_ID), AMMO_QUANTITY);
+        assert_eq!(storage_unit.item_quantity(AMMO_ITEM_ID), AMMO_QUANTITY);
         ts::return_shared(storage_unit);
     };
     ts::end(ts);
@@ -285,7 +285,7 @@ fun test_deposit_and_withdraw_by_owner() {
             &owner_cap,
             ts.ctx(),
         );
-        assert_eq!(storage_unit.get_item_quantity(AMMO_ITEM_ID), AMMO_QUANTITY);
+        assert_eq!(storage_unit.item_quantity(AMMO_ITEM_ID), AMMO_QUANTITY);
         ts::return_shared(storage_unit);
         ts::return_to_sender(&ts, owner_cap);
     };
@@ -333,18 +333,18 @@ fun test_swap_ammo_for_lens() {
 
         let used_capacity_a = (LENS_QUANTITY as u64* LENS_VOLUME);
         let used_capacity_b = (AMMO_QUANTITY as u64* AMMO_VOLUME);
-        let inv_ref_a = storage_a.get_inventory();
-        let inv_ref_b = storage_b.get_inventory();
+        let inv_ref_a = storage_a.inventory();
+        let inv_ref_b = storage_b.inventory();
 
         assert_eq!(inv_ref_a.used_capacity(), used_capacity_a);
         assert_eq!(inv_ref_a.remaining_capacity(), MAX_CAPACITY - used_capacity_a);
         assert_eq!(inv_ref_b.used_capacity(), used_capacity_b);
         assert_eq!(inv_ref_b.remaining_capacity(), MAX_CAPACITY - used_capacity_b);
 
-        assert_eq!(storage_a.get_item_quantity(LENS_ITEM_ID), LENS_QUANTITY);
-        assert!(!storage_a.get_inventory().contains_item(AMMO_ITEM_ID));
-        assert_eq!(storage_b.get_item_quantity(AMMO_ITEM_ID), AMMO_QUANTITY);
-        assert!(!storage_b.get_inventory().contains_item(LENS_ITEM_ID));
+        assert_eq!(storage_a.item_quantity(LENS_ITEM_ID), LENS_QUANTITY);
+        assert!(!storage_a.inventory().contains_item(AMMO_ITEM_ID));
+        assert_eq!(storage_b.item_quantity(AMMO_ITEM_ID), AMMO_QUANTITY);
+        assert!(!storage_b.inventory().contains_item(LENS_ITEM_ID));
 
         ts::return_shared(storage_a);
         ts::return_shared(storage_b);
@@ -375,10 +375,10 @@ fun test_swap_ammo_for_lens() {
         let storage_a = ts::take_shared_by_id<StorageUnit>(&ts, storage_a_id);
         let storage_b = ts::take_shared_by_id<StorageUnit>(&ts, storage_b_id);
 
-        assert_eq!(storage_a.get_item_quantity(AMMO_ITEM_ID), AMMO_QUANTITY);
-        assert!(!storage_a.get_inventory().contains_item(LENS_ITEM_ID));
-        assert_eq!(storage_b.get_item_quantity(LENS_ITEM_ID), LENS_QUANTITY);
-        assert!(!storage_b.get_inventory().contains_item(AMMO_ITEM_ID));
+        assert_eq!(storage_a.item_quantity(AMMO_ITEM_ID), AMMO_QUANTITY);
+        assert!(!storage_a.inventory().contains_item(LENS_ITEM_ID));
+        assert_eq!(storage_b.item_quantity(LENS_ITEM_ID), LENS_QUANTITY);
+        assert!(!storage_b.inventory().contains_item(AMMO_ITEM_ID));
 
         ts::return_shared(storage_a);
         ts::return_shared(storage_b);

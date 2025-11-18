@@ -36,11 +36,11 @@ public struct StatusChangedEvent has copy, drop {
 }
 
 // === View Functions ===
-public fun get_status(assembly_status: &AssemblyStatus): Status {
+public fun status(assembly_status: &AssemblyStatus): Status {
     assembly_status.status
 }
 
-public fun get_assembly_id(assembly_status: &AssemblyStatus): ID {
+public fun assembly_id(assembly_status: &AssemblyStatus): ID {
     assembly_status.assembly_id
 }
 
