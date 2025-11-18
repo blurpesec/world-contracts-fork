@@ -79,10 +79,10 @@ public fun verify_signature(
     // deserializes the message
     let message_bcs = bcs::to_bytes(&message);
     // Hash the message with intent
-    // x"030000" based upon `Intent::personal_message()` in Sui's shared-crypto crate: 
+    // x"030000" based upon `Intent::personal_message()` in Sui's shared-crypto crate:
     // 0x03 = IntentScope::PersonalMessage intent scope in Sui protocol
     // 0x00 = IntentVersion::V0 intent version
-    // 0x00 = AppId::Sui 
+    // 0x00 = AppId::Sui
     let mut message_with_intent = x"030000";
     message_with_intent.append(message_bcs);
     let digest = hash::blake2b256(&message_with_intent);
