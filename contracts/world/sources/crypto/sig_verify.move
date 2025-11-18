@@ -90,8 +90,9 @@ public fun verify_signature(
     // Extract public key bytes (from index 1 + sig_len to expected_len)
     let raw_public_key = extract_bytes(&signature, 1 + sig_len, expected_len);
 
-    // Hash the message with intent
+    // deserializes the message
     let message_bcs = bcs::to_bytes(&message);
+    // Hash the message with intent
     // 0x03 = PersonalMessage intent in Sui protocol
     let mut message_with_intent = x"030000";
     message_with_intent.append(message_bcs);
