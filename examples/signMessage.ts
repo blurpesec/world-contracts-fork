@@ -1,6 +1,6 @@
-import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { blake2b } from '@noble/hashes/blake2b';
-import { bcs } from '@mysten/sui/bcs';
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { blake2b } from "@noble/hashes/blake2b";
+import { bcs } from "@mysten/sui/bcs";
 
 /**
  * Creates an intent message following Sui's PersonalMessage format
@@ -35,7 +35,7 @@ export function hashIntentMessage(intentMessage: Uint8Array): Uint8Array {
  * - flag (1 byte): 0x00 for Ed25519
  * - signature (64 bytes): Ed25519 signature
  * - public_key (32 bytes): Ed25519 public key
- * 
+ *
  * This matches the format expected by sig_verify.move lines 24-46
  */
 export async function signPersonalMessage(
@@ -68,7 +68,10 @@ export async function signPersonalMessage(
  * Helper to convert Uint8Array to hex string for display/debugging
  */
 export function toHex(bytes: Uint8Array): string {
-    return '0x' + Array.from(bytes)
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
+    return (
+        "0x" +
+        Array.from(bytes)
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("")
+    );
 }

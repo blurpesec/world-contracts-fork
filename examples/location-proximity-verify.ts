@@ -8,8 +8,7 @@ import { getConfig, MODULES, Network } from "./config";
 import { createClient, loadKeypair } from "./client";
 import { signPersonalMessage, toHex } from "./signMessage";
 
-
-const CLOCK_ID = '0x6';
+const CLOCK_ID = "0x6";
 const DEADLINE_BUFFER_MS = 60000; // 1 minute
 const TEST_STRUCTURE_B_ID = "0x0000000000000000000000000000000000000000000000000000000000000002";
 const TEST_STORAGE_UNIT_TYPE_ID = 10000234n;
@@ -17,7 +16,7 @@ const TEST_STORAGE_UNIT_ITEM_ID = 1n;
 const TEST_STORAGE_UNIT_MAX_CAPACITY = 10000000n;
 
 // BCS schema for Location Message
-const LocationMessage = bcs.struct('Message', {
+const LocationMessage = bcs.struct("Message", {
     from: bcs.Address,
     to: bcs.Address,
     structure_a_id: bcs.Address,
@@ -40,7 +39,6 @@ interface LocationMessageData {
     deadline_ms: bigint;
 }
 
-
 function createLocationHashFromCoordinates(
     solarSystemId: number,
     x: number,
@@ -53,7 +51,7 @@ function createLocationHashFromCoordinates(
     const view = new DataView(buffer);
 
     // Convert numbers to bigint for proper 64-bit handling
-    view.setBigUint64(0, BigInt(solarSystemId), true);  // little-endian
+    view.setBigUint64(0, BigInt(solarSystemId), true); // little-endian
     view.setBigUint64(8, BigInt(Math.floor(x)), true);
     view.setBigUint64(16, BigInt(Math.floor(y)), true);
     view.setBigUint64(24, BigInt(Math.floor(z)), true);
@@ -62,7 +60,6 @@ function createLocationHashFromCoordinates(
 
     return blake2b(coordinatesBytes, { dkLen: 32 });
 }
-
 
 function createLocationMessage(
     from: string,
@@ -99,14 +96,12 @@ async function signLocationMessage(
     return [messageBytes, fullSignature];
 }
 
-
 function logSignatureDetails(fullSignature: Uint8Array): void {
     console.log("Full signature (97 bytes):", toHex(fullSignature));
     console.log("  - Flag (1 byte):", toHex(fullSignature.slice(0, 1)));
     console.log("  - Signature (64 bytes):", toHex(fullSignature.slice(1, 65)));
     console.log("  - Public key (32 bytes):", toHex(fullSignature.slice(65, 97)));
 }
-
 
 async function createStorageUnit(
     client: SuiClient,
@@ -131,10 +126,7 @@ async function createStorageUnit(
 
     tx.moveCall({
         target: `${config.packageId}::${MODULES.STORAGE_UNIT}::share_storage_unit`,
-        arguments: [
-            storageUnit,
-            tx.object(config.adminCapObjectId),
-        ],
+        arguments: [storageUnit, tx.object(config.adminCapObjectId)],
     });
 
     const result = await client.signAndExecuteTransaction({
@@ -144,7 +136,7 @@ async function createStorageUnit(
     });
 
     const storageUnitId = result.objectChanges?.find(
-        change => change.type === 'created'
+        (change) => change.type === "created"
     )?.objectId;
 
     if (!storageUnitId) {
@@ -154,7 +146,6 @@ async function createStorageUnit(
     console.log("Storage unit created:", storageUnitId);
     return storageUnitId;
 }
-
 
 async function verifyProximity(
     client: SuiClient,
@@ -188,11 +179,7 @@ async function verifyProximity(
     // Verify proximity - this returns a bool
     tx.moveCall({
         target: `${config.packageId}::${MODULES.STORAGE_UNIT}::verify_storage_proximity`,
-        arguments: [
-            tx.object(storageUnitId),
-            proof,
-            tx.object(CLOCK_ID),
-        ],
+        arguments: [tx.object(storageUnitId), proof, tx.object(CLOCK_ID)],
     });
 
     // Using devInspectTransactionBlock to read the return value
@@ -202,7 +189,7 @@ async function verifyProximity(
         sender: senderAddress,
     });
 
-    if (inspectResult.effects.status.status !== 'success') {
+    if (inspectResult.effects.status.status !== "success") {
         console.error("Verification transaction failed:", inspectResult.effects.status.error);
         return false;
     }
@@ -223,20 +210,20 @@ async function verifyProximity(
     }
 }
 
-
-
 async function main() {
     console.log("=== Location Proximity Verification example ===\n");
-    console.log("!!For this example to work, the contract needs to be deployed using `pnpm run deploy` first !!\n");
+    console.log(
+        "!!For this example to work, the contract needs to be deployed using `pnpm run deploy` first !!\n"
+    );
 
     try {
-        const network = (process.env.SUI_NETWORK as Network) || 'localnet';
+        const network = (process.env.SUI_NETWORK as Network) || "localnet";
         const exportedKey = process.env.PRIVATE_KEY;
 
         if (!exportedKey) {
             throw new Error(
                 "PRIVATE_KEY environment variable is required. " +
-                "Create a .env file with PRIVATE_KEY=suiprivkey1..."
+                    "Create a .env file with PRIVATE_KEY=suiprivkey1..."
             );
         }
 
@@ -253,22 +240,17 @@ async function main() {
 
         // Use Blake2b hash of coordinates (example coordinates)
         const locationHash = createLocationHashFromCoordinates(
-            1,    // solarSystemId
-            100,  // x coordinate
-            200,  // y coordinate
-            300   // z coordinate
+            1, // solarSystemId
+            100, // x coordinate
+            200, // y coordinate
+            300 // z coordinate
         );
         console.log("\nLocation hash:", toHex(locationHash));
 
         // Step 1. Create storage unit
-        const storageUnitId = await createStorageUnit(
-            client,
-            keypair,
-            config,
-            locationHash
-        );
+        const storageUnitId = await createStorageUnit(client, keypair, config, locationHash);
 
-        // Step 2. Construct message to sign and authorise a location proximity 
+        // Step 2. Construct message to sign and authorise a location proximity
         console.log("\n=== Constructing Location Message ===");
         const message = createLocationMessage(
             adminAddress,
@@ -310,7 +292,6 @@ async function main() {
             console.log("\n=== Location verification failed ===");
             process.exit(1);
         }
-
     } catch (error) {
         console.error("\n=== Error ===");
         console.error("Error:", error instanceof Error ? error.message : error);
