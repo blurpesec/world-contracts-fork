@@ -209,6 +209,17 @@ if [ -z "$GOVERNOR_CAP_ID" ] || [ "$GOVERNOR_CAP_ID" = "null" ]; then
 fi
 
 echo "GovernorCap ID: $GOVERNOR_CAP_ID"
+
+# Extract CharacterRegistry ID (shared object)
+CHARACTER_REGISTRY_ID=$(echo "$PUBLISH_OUTPUT" | jq -r '.objectChanges[] | select(.objectType != null and (.objectType | contains("CharacterRegistry"))) | .objectId')
+
+if [ -z "$CHARACTER_REGISTRY_ID" ] || [ "$CHARACTER_REGISTRY_ID" = "null" ]; then
+    echo "Error: Failed to extract CharacterRegistry ID"
+    cat "deployments/.output/${ENV}-publish-output.json"
+    exit 1
+fi
+
+echo "CharacterRegistry ID: $CHARACTER_REGISTRY_ID"
 echo ""
 
 # Create admin capabilities
@@ -276,6 +287,7 @@ cat > "$OUTPUT_FILE" << EOF
   "deployedBy": "$ACTIVE_ADDRESS",
   "packageId": "$PACKAGE_ID",
   "governorCapId": "$GOVERNOR_CAP_ID",
+  "characterRegistryId": "$CHARACTER_REGISTRY_ID",
   "adminCaps": $ADMIN_CAPS_JSON
 }
 EOF
@@ -285,6 +297,7 @@ echo "Deployment Complete!"
 echo "======================================"
 echo "Package ID: $PACKAGE_ID"
 echo "GovernorCap ID: $GOVERNOR_CAP_ID"
+echo "CharacterRegistry ID: $CHARACTER_REGISTRY_ID"
 echo "Admin Caps Created: ${#ADMIN_CAP_IDS[@]}"
 echo ""
 echo "Deployment info saved to: $OUTPUT_FILE"
