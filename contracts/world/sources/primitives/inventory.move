@@ -7,9 +7,9 @@
 /// - The `game to chain`(mint) action is restricted by an admin capability and the `chain to game`(burn) action is restricted by a proximity proof.
 module world::inventory;
 
-use sui::{event, vec_map::{Self, VecMap}};
+use sui::{clock::Clock, event, vec_map::{Self, VecMap}};
 use world::{
-    authority::{Self, AdminCap, OwnerCap},
+    authority::{Self, AdminCap, OwnerCap, ServerAddressRegistry},
     location::{Self, Location},
     status::{Self, AssemblyStatus}
 };
@@ -105,53 +105,24 @@ public fun contains_item(inventory: &Inventory, item_id: u64): bool {
     vec_map::contains(&inventory.items, &item_id)
 }
 
-// === Public Functions ===
-// TODO: Transfer items between two inventories by providing proximity proofs
+public fun get_item_location_hash(item: &Item): vector<u8> {
+    item.location.get_location_hash()
+}
 
-// Note: Shouldn't this be admin capped ?
-// Will it by default mint to ship/character inventory ?
-/// Burns items from on-chain inventory (Chain → Game bridge)
-/// Emits ItemBurnedEvent for game server to create item in-game
-/// Deletes Item object if param quantity = existing quantity, otherwise reduces quantity
-public fun burn_items(
+public fun burn_items_with_proof(
     inventory: &mut Inventory,
     assembly_status: &AssemblyStatus,
+    location: &Location,
     owner_cap: &OwnerCap,
     item_id: u64,
     quantity: u32,
-    location_hash: vector<u8>,
-    proximity_proof: vector<u8>,
+    server_registry: &ServerAddressRegistry,
+    location_proof: vector<u8>,
+    clock: &Clock,
+    ctx: &mut TxContext,
 ) {
-    assert!(inventory.id == status::get_assembly_id(assembly_status), EInventoryAssemblyMismatch);
-    assert!(authority::is_authorized(owner_cap, inventory.id), EInventoryAccessNotAuthorized);
-    assert!(vec_map::contains(&inventory.items, &item_id), EItemDoesNotExist);
-    assert!(assembly_status.is_online(), ENotOnline);
-
-    //TODO: Verify proximity
-
-    let item_ref = vec_map::get(&inventory.items, &item_id);
-    assert!(item_ref.quantity >= quantity, EInventoryInsufficientQuantity);
-    let current_quantity = item_ref.quantity;
-
-    // If burning all items, remove and delete the Item object
-    if (current_quantity == quantity) {
-        let (_, removed_item) = vec_map::remove(&mut inventory.items, &item_id);
-        let volume_freed = calculate_volume(removed_item.volume, removed_item.quantity);
-        inventory.used_capacity = inventory.used_capacity - volume_freed;
-
-        let Item { id, type_id: _, item_id: _, volume: _, quantity: _, location } = removed_item;
-        location.remove_location();
-        object::delete(id);
-
-        // Emit event for game bridge to listen
-        event::emit(ItemBurnedEvent {
-            inventory_id: inventory.id,
-            item_id,
-            quantity,
-        });
-    } else {
-        reduce_item_quantity(inventory, item_id, quantity);
-    };
+    location::verify_location_proof_as_bytes(location, location_proof, server_registry, clock, ctx);
+    burn_items(inventory, assembly_status, owner_cap, item_id, quantity);
 }
 
 // === Admin Functions ===
@@ -262,6 +233,48 @@ public(package) fun withdraw_item(inventory: &mut Inventory, item_id: u64): Item
 
 // === Private Functions ===
 
+// Note: Shouldn't this be admin capped ?
+// Will it by default mint to ship/character inventory ?
+/// Burns items from on-chain inventory (Chain → Game bridge)
+/// Emits ItemBurnedEvent for game server to create item in-game
+/// Deletes Item object if param quantity = existing quantity, otherwise reduces quantity
+fun burn_items(
+    inventory: &mut Inventory,
+    assembly_status: &AssemblyStatus,
+    owner_cap: &OwnerCap,
+    item_id: u64,
+    quantity: u32,
+) {
+    assert!(inventory.id == status::get_assembly_id(assembly_status), EInventoryAssemblyMismatch);
+    assert!(authority::is_authorized(owner_cap, inventory.id), EInventoryAccessNotAuthorized);
+    assert!(vec_map::contains(&inventory.items, &item_id), EItemDoesNotExist);
+    assert!(assembly_status.is_online(), ENotOnline);
+
+    let item_ref = vec_map::get(&inventory.items, &item_id);
+    assert!(item_ref.quantity >= quantity, EInventoryInsufficientQuantity);
+    let current_quantity = item_ref.quantity;
+
+    // If burning all items, remove and delete the Item object
+    if (current_quantity == quantity) {
+        let (_, removed_item) = vec_map::remove(&mut inventory.items, &item_id);
+        let volume_freed = calculate_volume(removed_item.volume, removed_item.quantity);
+        inventory.used_capacity = inventory.used_capacity - volume_freed;
+
+        let Item { id, type_id: _, item_id: _, volume: _, quantity: _, location } = removed_item;
+        location.remove_location();
+        object::delete(id);
+
+        // Emit event for game bridge to listen
+        event::emit(ItemBurnedEvent {
+            inventory_id: inventory.id,
+            item_id,
+            quantity,
+        });
+    } else {
+        reduce_item_quantity(inventory, item_id, quantity);
+    };
+}
+
 /// Increases the quantity value of an existing item in the specified inventory.
 fun increase_item_quantity(inventory: &mut Inventory, item_id: u64, quantity: u32) {
     let item = vec_map::get_mut(&mut inventory.items, &item_id);
@@ -326,10 +339,43 @@ public fun get_item_quantity(inventory: &Inventory, item_id: u64): u32 {
 #[test_only]
 public fun get_item_location(inventory: &Inventory, item_id: u64): vector<u8> {
     let item = vec_map::get(&inventory.items, &item_id);
-    location::get_hash(&item.location)
+    location::get_location_hash(&item.location)
 }
 
 #[test_only]
 public fun get_inventory_item_length(inventory: &Inventory): u64 {
     vec_map::length(&inventory.items)
+}
+
+#[test_only]
+public fun burn_items_test(
+    inventory: &mut Inventory,
+    assembly_status: &AssemblyStatus,
+    owner_cap: &OwnerCap,
+    item_id: u64,
+    quantity: u32,
+) {
+    burn_items(inventory, assembly_status, owner_cap, item_id, quantity);
+}
+
+// Mocking without deadline
+#[test_only]
+public fun burn_items_with_proof_test(
+    inventory: &mut Inventory,
+    assembly_status: &AssemblyStatus,
+    location: &Location,
+    owner_cap: &OwnerCap,
+    item_id: u64,
+    quantity: u32,
+    server_registry: &ServerAddressRegistry,
+    location_proof: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    location::verify_location_proof_as_bytes_without_deadline(
+        location,
+        location_proof,
+        server_registry,
+        ctx,
+    );
+    burn_items(inventory, assembly_status, owner_cap, item_id, quantity);
 }

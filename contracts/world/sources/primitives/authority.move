@@ -13,7 +13,7 @@
 
 module world::authority;
 
-use sui::event;
+use sui::{event, table::{Self, Table}};
 use world::world::GovernorCap;
 
 public struct AdminCap has key {
@@ -26,9 +26,37 @@ public struct OwnerCap has key {
     owned_object_id: ID,
 }
 
+/// Registry of authorized server addresses that can sign location proofs.
+/// Only the deployer (stored in `admin`) can modify it.
+public struct ServerAddressRegistry has key {
+    id: UID,
+    authorized_address: Table<address, bool>,
+}
+
 public struct AdminCapCreatedEvent has copy, drop {
     admin_cap_id: ID,
     admin: address,
+}
+
+public struct ServerAddressRegistryCreated has copy, drop {
+    server_address_registry_id: ID,
+    registry_admin: address,
+}
+
+fun init(ctx: &mut TxContext) {
+    let deployer = ctx.sender();
+    let server_address_registry = ServerAddressRegistry {
+        id: object::new(ctx),
+        authorized_address: table::new(ctx),
+    };
+
+    event::emit(ServerAddressRegistryCreated {
+        server_address_registry_id: object::id(&server_address_registry),
+        registry_admin: deployer,
+    });
+
+    // Share the registry so anyone can read it for verification
+    transfer::share_object(server_address_registry);
 }
 
 public fun create_admin_cap(_: &GovernorCap, admin: address, ctx: &mut TxContext) {
@@ -60,6 +88,30 @@ public fun transfer_owner_cap(owner_cap: OwnerCap, _: &AdminCap, owner: address)
     transfer::transfer(owner_cap, owner);
 }
 
+public fun register_server_address(
+    server_address_registry: &mut ServerAddressRegistry,
+    _: &GovernorCap,
+    server_address: address,
+) {
+    table::add(&mut server_address_registry.authorized_address, server_address, true);
+}
+
+public fun remove_server_address(
+    server_address_registry: &mut ServerAddressRegistry,
+    _: &GovernorCap,
+    server_address: address,
+) {
+    table::remove(&mut server_address_registry.authorized_address, server_address);
+}
+
+/// Checks if an address is an authorized server address.
+public fun is_authorized_server_address(
+    server_address_registry: &ServerAddressRegistry,
+    address: address,
+): bool {
+    table::contains(&server_address_registry.authorized_address, address)
+}
+
 // Ideally only the owner can delete the owner cap
 public fun delete_owner_cap(owner_cap: OwnerCap, _: &AdminCap) {
     let OwnerCap { id, .. } = owner_cap;
@@ -70,4 +122,9 @@ public fun delete_owner_cap(owner_cap: OwnerCap, _: &AdminCap) {
 /// Returns true iff the `OwnerCap` has mutation access for the specified object.
 public fun is_authorized(owner_cap: &OwnerCap, object_id: ID): bool {
     owner_cap.owned_object_id == object_id
+}
+
+#[test_only]
+public fun init_for_testing(ctx: &mut TxContext) {
+    init(ctx);
 }

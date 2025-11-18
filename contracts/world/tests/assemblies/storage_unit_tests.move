@@ -11,7 +11,6 @@ use world::{
 
 const LOCATION_A_HASH: vector<u8> =
     x"7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b";
-const PROOF: vector<u8> = x"5a2f1b0e7c4d1a6f5e8b2d9c3f7a1e5b";
 const MAX_CAPACITY: u64 = 100000;
 const STORAGE_TYPE_ID: u64 = 50001;
 const STORAGE_ITEM_ID: u64 = 90001;
@@ -108,7 +107,7 @@ fun mint_ammo(ts: &mut ts::Scenario, storage_id: ID) {
     {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(ts, storage_id);
         let admin_cap = ts::take_from_sender<AdminCap>(ts);
-        storage_unit.game_to_chain_inventory(
+        storage_unit.game_item_to_chain_inventory(
             &admin_cap,
             AMMO_ITEM_ID,
             AMMO_TYPE_ID,
@@ -126,7 +125,7 @@ fun mint_lens(ts: &mut ts::Scenario, storage_id: ID) {
     {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(ts, storage_id);
         let admin_cap = ts::take_from_sender<AdminCap>(ts);
-        storage_unit.game_to_chain_inventory(
+        storage_unit.game_item_to_chain_inventory(
             &admin_cap,
             LENS_ITEM_ID,
             LENS_TYPE_ID,
@@ -154,7 +153,7 @@ fun test_create_storage_unit() {
         assert_eq!(inv_ref.used_capacity(), 0);
         assert_eq!(inv_ref.remaining_capacity(), MAX_CAPACITY);
         assert_eq!(inv_ref.get_inventory_item_length(), 0);
-        assert_eq!(location_ref.get_hash(), LOCATION_A_HASH);
+        assert_eq!(location_ref.get_location_hash(), LOCATION_A_HASH);
         ts::return_shared(storage_unit);
     };
     ts::end(ts);

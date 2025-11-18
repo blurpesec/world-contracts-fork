@@ -22,11 +22,11 @@
 module world::storage_unit;
 
 use std::type_name::{Self, TypeName};
-use sui::event;
+use sui::{clock::Clock, event};
 use world::{
-    authority::{Self, OwnerCap, AdminCap},
+    authority::{Self, OwnerCap, AdminCap, ServerAddressRegistry},
     inventory::{Self, Inventory, Item},
-    location::{Self, Location},
+    location::{Self, Location, LocationProof},
     status::{Self, AssemblyStatus, Status}
 };
 
@@ -118,8 +118,7 @@ public fun online(storage_unit: &mut StorageUnit, owner_cap: &OwnerCap) {
     storage_unit.status.online(owner_cap);
 }
 
-// Should we rename the function ?
-public fun game_to_chain_inventory(
+public fun game_item_to_chain_inventory(
     storage_unit: &mut StorageUnit,
     admin_cap: &AdminCap,
     item_id: u64,
@@ -137,12 +136,51 @@ public fun game_to_chain_inventory(
             type_id,
             volume,
             quantity,
-            storage_unit.location.get_hash(),
+            storage_unit.location.get_location_hash(),
             ctx,
         )
 }
 
-// TODO: add chain to game function
+public fun chain_item_to_game_inventory(
+    storage_unit: &mut StorageUnit,
+    server_registry: &ServerAddressRegistry,
+    location_proof: vector<u8>,
+    owner_cap: &OwnerCap,
+    item_id: u64,
+    quantity: u32,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    storage_unit
+        .inventory
+        .burn_items_with_proof(
+            &storage_unit.status,
+            &storage_unit.location,
+            owner_cap,
+            item_id,
+            quantity,
+            server_registry,
+            location_proof,
+            clock,
+            ctx,
+        );
+}
+
+public fun verify_storage_proximity(
+    storage_unit: &StorageUnit,
+    proof: LocationProof,
+    clock: &Clock,
+    server_address_registry: &ServerAddressRegistry,
+    ctx: &mut TxContext,
+) {
+    location::verify_location_proof_as_struct(
+        &storage_unit.location,
+        proof,
+        server_address_registry,
+        clock,
+        ctx,
+    );
+}
 
 public fun deposit_item<Auth: drop>(
     storage_unit: &mut StorageUnit,
@@ -179,7 +217,12 @@ public fun deposit_by_owner(
     _: &mut TxContext,
 ) {
     assert!(authority::is_authorized(owner_cap, object::id(storage_unit)), EAccessNotAuthorized);
-    // do a proximity check to see if the item location and the storage unit have the same location.
+    location::verify_same_location(
+        storage_unit.location.get_location_hash(),
+        item.get_item_location_hash(),
+    );
+
+    // todo: verify location proof (It already has the location check, do we need proof ?)
     storage_unit.inventory.deposit_item(item);
 }
 
@@ -190,7 +233,7 @@ public fun withdraw_by_owner(
     _: &mut TxContext,
 ): Item {
     assert!(authority::is_authorized(owner_cap, object::id(storage_unit)), EAccessNotAuthorized);
-    // do a proximity check to see if the item location and the storage unit have the same location.
+    // todo: verify location proof to withdraw
     storage_unit.inventory.withdraw_item(item_id)
 }
 
@@ -215,4 +258,28 @@ public fun get_item_quantity(storage_unit: &StorageUnit, item_id: u64): u32 {
 #[test_only]
 public fun contains_item(storage_unit: &StorageUnit, item_id: u64): bool {
     storage_unit.inventory.contains_item(item_id)
+}
+
+#[test_only]
+public fun chain_item_to_game_inventory_test(
+    storage_unit: &mut StorageUnit,
+    server_registry: &ServerAddressRegistry,
+    location_proof: vector<u8>,
+    owner_cap: &OwnerCap,
+    item_id: u64,
+    quantity: u32,
+    ctx: &mut TxContext,
+) {
+    storage_unit
+        .inventory
+        .burn_items_with_proof_test(
+            &storage_unit.status,
+            &storage_unit.location,
+            owner_cap,
+            item_id,
+            quantity,
+            server_registry,
+            location_proof,
+            ctx,
+        );
 }
