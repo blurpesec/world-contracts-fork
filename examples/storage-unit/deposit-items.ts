@@ -42,8 +42,8 @@ async function withdrawItem(
     });
 
     // Find the ItemMintedEvent and extract the item_uid
-    const mintEvent = result.events?.find(
-        (event) => event.type.endsWith("::inventory::ItemMintedEvent")
+    const mintEvent = result.events?.find((event) =>
+        event.type.endsWith("::inventory::ItemMintedEvent")
     );
 
     if (!mintEvent) {
@@ -74,7 +74,7 @@ async function main() {
         if (!exportedKey) {
             throw new Error(
                 "PRIVATE_KEY environment variable is required. " +
-                "Create a .env file with PRIVATE_KEY=suiprivkey1..."
+                    "Create a .env file with PRIVATE_KEY=suiprivkey1..."
             );
         }
 

@@ -45,8 +45,8 @@ async function gameItemToChain(
     });
 
     // Find the ItemMintedEvent and extract the item_uid
-    const mintEvent = result.events?.find(
-        (event) => event.type.endsWith("::inventory::ItemMintedEvent")
+    const mintEvent = result.events?.find((event) =>
+        event.type.endsWith("::inventory::ItemMintedEvent")
     );
 
     if (!mintEvent) {
@@ -66,7 +66,6 @@ async function gameItemToChain(
     console.log("Items moved on-chain: ", type_id);
 }
 
-
 async function main() {
     console.log("============= Create example ==============\n");
 
@@ -78,7 +77,7 @@ async function main() {
         if (!exportedKey) {
             throw new Error(
                 "PRIVATE_KEY environment variable is required. " +
-                "Create a .env file with PRIVATE_KEY=suiprivkey1..."
+                    "Create a .env file with PRIVATE_KEY=suiprivkey1..."
             );
         }
 
@@ -92,7 +91,16 @@ async function main() {
         console.log("Server address:", adminAddress);
         console.log("Player address:", playerAddress);
 
-        await gameItemToChain(STORAGE_UNIT_ID, ITEM_A_TYPE_ID, ITEM_ID, 10n, 10, client, keypair, config);
+        await gameItemToChain(
+            STORAGE_UNIT_ID,
+            ITEM_A_TYPE_ID,
+            ITEM_ID,
+            10n,
+            10,
+            client,
+            keypair,
+            config
+        );
     } catch (error) {
         console.error("\n=== Error ===");
         console.error("Error:", error instanceof Error ? error.message : error);
