@@ -11,8 +11,15 @@
     "fmt:check": "prettier --plugin=@mysten/prettier-plugin-move --check \"**/**/*.move\" \"examples/**/*.ts\"",
     "fmt:ts": "prettier --write \"examples/**/*.ts\"",
     "fmt:ts:check": "prettier --check \"examples/**/*.ts\"",
-    "sig-verify": "tsx examples/sig-verify.ts",
-    "verify-location-proximity": "tsx examples/location-proximity-verify.ts"
+    "sig-verify": "tsx examples/crypto/sig-verify.ts",
+    "verify-location-proximity": "tsx examples/location/location-proximity-verify.ts",
+    "create-character": "tsx examples/character/create-character.ts",
+    "create-storage-unit": "tsx examples/storage-unit/create-storage-unit.ts",
+    "online": "tsx examples/storage-unit/online.ts",
+    "game-item-to-chain": "tsx examples/storage-unit/game-item-to-chain.ts",
+    "chain-item-to-game": "tsx examples/storage-unit/chain-item-to-game.ts",
+    "deposit-items": "tsx examples/storage-unit/deposit-items.ts",
+    "withdraw-items": "tsx examples/storage-unit/withdraw-items.ts"
   },
   "dependencies": {
     "@mysten/prettier-plugin-move": "^0.3.3",

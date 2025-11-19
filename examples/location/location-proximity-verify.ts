@@ -4,9 +4,9 @@ import { bcs } from "@mysten/sui/bcs";
 import { SuiClient } from "@mysten/sui/client";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { blake2b } from "@noble/hashes/blake2b";
-import { getConfig, MODULES, Network } from "./config";
-import { createClient, loadKeypair } from "./client";
-import { signPersonalMessage, toHex } from "./signMessage";
+import { getConfig, MODULES, Network } from "../utils/config";
+import { createClient, loadKeypair } from "../utils/client";
+import { signPersonalMessage, toHex } from "../crypto/signMessage";
 
 const CLOCK_ID = "0x6";
 const DEADLINE_BUFFER_MS = 60000; // 1 minute

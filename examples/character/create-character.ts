@@ -1,0 +1,134 @@
+import "dotenv/config";
+import { Transaction } from "@mysten/sui/transactions";
+import { bcs } from "@mysten/sui/bcs";
+import { SuiClient } from "@mysten/sui/client";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { getConfig, MODULES, Network } from "../utils/config";
+import { createClient, loadKeypair } from "../utils/client";
+import { createOwnerCapForObject } from "../utils/ownerCap";
+
+const GAME_CHARACTER_ID = Math.floor(Math.random() * 1000000) + 1;
+const TRIBE_ID = 100;
+
+async function createCharacter(
+    client: SuiClient,
+    keypair: Ed25519Keypair,
+    config: ReturnType<typeof getConfig>
+): Promise<string> {
+    console.log("\n==== Creating a character ====");
+    console.log("Game Character ID:", GAME_CHARACTER_ID);
+    console.log("Tribe ID:", TRIBE_ID);
+
+    const tx = new Transaction();
+
+    const [character] = tx.moveCall({
+        target: `${config.packageId}::${MODULES.CHARACTER}::create_character`,
+        arguments: [
+            tx.object(config.characterRegisterId),
+            tx.object(config.adminCapObjectId),
+            tx.pure.u32(GAME_CHARACTER_ID),
+            tx.pure.u32(TRIBE_ID),
+            tx.pure.string("frontier-character-a"),
+        ],
+    });
+
+    tx.moveCall({
+        target: `${config.packageId}::${MODULES.CHARACTER}::share_character`,
+        arguments: [character, tx.object(config.adminCapObjectId)],
+    });
+
+    const result = await client.signAndExecuteTransaction({
+        transaction: tx,
+        signer: keypair,
+        options: { showObjectChanges: true },
+    });
+
+    // object id of the character
+    const characterId = result.objectChanges?.find((change) => change.type === "created")?.objectId;
+    if (!characterId) {
+        throw new Error("Failed to create character and object id was not found");
+    }
+
+    console.log("Character created", characterId);
+    return characterId;
+}
+
+// async function createOwnerCap(
+//     characterId: string,
+//     playerAddress: string,
+//     client: SuiClient,
+//     keypair: Ed25519Keypair,
+//     config: ReturnType<typeof getConfig>
+// ) {
+//     console.log("\n==== Creating a Owner Cap ====");
+
+//     const tx = new Transaction();
+
+//     const [ownerCap] = tx.moveCall({
+//         target: `${config.packageId}::${MODULES.AUTHORITY}::create_owner_cap`,
+//         arguments: [tx.object(config.adminCapObjectId), tx.pure.address(characterId)],
+//     });
+
+//     tx.moveCall({
+//         target: `${config.packageId}::${MODULES.AUTHORITY}::transfer_owner_cap`,
+//         arguments: [ownerCap, tx.object(config.adminCapObjectId), tx.pure.address(playerAddress)],
+//     });
+
+//     const result = await client.signAndExecuteTransaction({
+//         transaction: tx,
+//         signer: keypair,
+//         options: { showObjectChanges: true },
+//     });
+
+//     // object id of the ownerCap
+//     const ownerCapId = result.objectChanges?.find((change) => change.type === "created")?.objectId;
+//     if (!ownerCapId) {
+//         throw new Error("Failed to create character and object id was not found");
+//     }
+
+//     console.log("Character created", ownerCapId);
+
+//     console.log("Owner cap transferred to player address");
+//     console.log("\n", result.digest);
+// }
+
+async function main() {
+    console.log("============= Create Character example ==============\n");
+
+    try {
+        const network = (process.env.SUI_NETWORK as Network) || "localnet";
+        const exportedKey = process.env.PRIVATE_KEY;
+        const playerAddress = process.env.PLAYER_A_ADDRESS || "";
+
+        if (!exportedKey) {
+            throw new Error(
+                "PRIVATE_KEY environment variable is required. " +
+                    "Create a .env file with PRIVATE_KEY=suiprivkey1..."
+            );
+        }
+
+        const client = createClient(network);
+        const keypair = loadKeypair(exportedKey);
+        const config = getConfig(network);
+
+        const adminAddress = keypair.getPublicKey().toSuiAddress();
+
+        console.log("Network:", network);
+        console.log("Server address:", adminAddress);
+        console.log("Player address:", playerAddress);
+
+        const characterId = await createCharacter(client, keypair, config);
+
+        // Create a owner cap for the character
+        await createOwnerCapForObject(characterId, playerAddress, client, keypair, config);
+    } catch (error) {
+        console.error("\n=== Error ===");
+        console.error("Error:", error instanceof Error ? error.message : error);
+        if (error instanceof Error && error.stack) {
+            console.error("Stack:", error.stack);
+        }
+        process.exit(1);
+    }
+}
+
+main().catch(console.error);
