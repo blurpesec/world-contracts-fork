@@ -6,16 +6,15 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getConfig, MODULES, Network } from "../utils/config";
 import { createClient, loadKeypair } from "../utils/client";
 
-const STORAGE_UNIT_ID = "0xf24567f0aa6aa62720c6889df730b94430c882353a3f2d324fb216e74f9b41de";
+const SHIP_INVENTORY_ID = "0x3036d4908afdea54f48e04ac988a8550a331a77797c671947c976d0f11c03656";
 
 const ITEM_A_TYPE_ID = BigInt(Math.floor(Math.random() * 1000000) + 5);
-const ITEM_B_TYPE_ID = BigInt(Math.floor(Math.random() * 500) + 500);
-const ITEM_ID = BigInt(Math.floor(Math.random() * 9) + 9);
+const CORPSE_ITEM_ID = 566789n;
 
 async function gameItemToChain(
     storageUnit: string,
-    type_id: bigint,
-    item_id: bigint,
+    typeId: bigint,
+    itemId: bigint,
     volume: bigint,
     quantity: number,
     client: SuiClient,
@@ -27,12 +26,12 @@ async function gameItemToChain(
     const tx = new Transaction();
 
     tx.moveCall({
-        target: `${config.packageId}::${MODULES.STORAGE_UNIT}::game_to_chain_inventory`,
+        target: `${config.packageId}::${MODULES.STORAGE_UNIT}::game_item_to_chain_inventory`,
         arguments: [
             tx.object(storageUnit),
             tx.object(config.adminCapObjectId),
-            tx.pure.u64(item_id),
-            tx.pure.u64(type_id),
+            tx.pure.u64(itemId),
+            tx.pure.u64(typeId),
             tx.pure.u64(volume),
             tx.pure.u32(quantity),
         ],
@@ -44,7 +43,6 @@ async function gameItemToChain(
         options: { showEvents: true },
     });
 
-    // Find the ItemMintedEvent and extract the item_uid
     const mintEvent = result.events?.find((event) =>
         event.type.endsWith("::inventory::ItemMintedEvent")
     );
@@ -53,7 +51,6 @@ async function gameItemToChain(
         throw new Error("ItemMintedEvent not found in transaction result");
     }
 
-    // Type the parsed event data to access item_uid
     const eventData = mintEvent.parsedJson as { item_uid: string };
     const itemObjectId = eventData.item_uid;
 
@@ -63,7 +60,8 @@ async function gameItemToChain(
 
     console.log("Item minted on-chain with objectId:", itemObjectId);
 
-    console.log("Items moved on-chain: ", type_id);
+    console.log("TypeId of the item: ", typeId);
+    console.log("ItemId of the item: ", itemId);
 }
 
 async function main() {
@@ -76,8 +74,7 @@ async function main() {
 
         if (!exportedKey) {
             throw new Error(
-                "PRIVATE_KEY environment variable is required. " +
-                    "Create a .env file with PRIVATE_KEY=suiprivkey1..."
+                "PRIVATE_KEY environment variable is required eg: PRIVATE_KEY=suiprivkey1..."
             );
         }
 
@@ -92,9 +89,9 @@ async function main() {
         console.log("Player address:", playerAddress);
 
         await gameItemToChain(
-            STORAGE_UNIT_ID,
+            SHIP_INVENTORY_ID,
             ITEM_A_TYPE_ID,
-            ITEM_ID,
+            CORPSE_ITEM_ID,
             10n,
             10,
             client,

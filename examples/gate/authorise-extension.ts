@@ -1,43 +1,30 @@
 import "dotenv/config";
 import { Transaction } from "@mysten/sui/transactions";
-import { bcs } from "@mysten/sui/bcs";
 import { SuiClient } from "@mysten/sui/client";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getConfig, MODULES, Network } from "../utils/config";
 import { createClient, loadKeypair } from "../utils/client";
-import { findOwnerCapForObject } from "../utils/ownerCap";
 
-const STORAGE_UNIT_ID = "0x3036d4908afdea54f48e04ac988a8550a331a77797c671947c976d0f11c03656";
+const GATE_ID = "0x5cf64c96cfe536fbe2213d69f9ebb0b464fd225c1c31b2dc0ffe60ccc5f32242";
+const EXTENSION_PACKAGE_ID = "0x224a9522433fe22ad3df25628579512acf21e3f66411d1c54133a917f8523844";
 
-async function online(
-    storageUnitId: string,
+async function authoriseExtension(
+    gateId: string,
+    extensionPackageId: string,
     client: SuiClient,
     keypair: Ed25519Keypair,
     config: ReturnType<typeof getConfig>
 ) {
-    console.log("\n==== Bringing Storage Unit Online ====");
-    console.log("Storage Unit ID:", storageUnitId);
+    console.log("\n==== Authorising Extension for Gate ====");
 
     const ownerAddress = keypair.getPublicKey().toSuiAddress();
-
-    const ownerCapId = await findOwnerCapForObject(
-        client,
-        ownerAddress,
-        storageUnitId,
-        config.packageId
-    );
-
-    if (!ownerCapId) {
-        throw new Error(`ownerCap not found for storage unit ${storageUnitId}. `);
-    }
-
-    console.log("OwnerCap:", ownerCapId);
 
     const tx = new Transaction();
 
     tx.moveCall({
-        target: `${config.packageId}::${MODULES.STORAGE_UNIT}::online`,
-        arguments: [tx.object(storageUnitId), tx.object(ownerCapId)],
+        target: `${config.packageId}::${MODULES.GATE}::authorize_extension`,
+        typeArguments: [`${extensionPackageId}::gate_extension::GateXAuth`],
+        arguments: [tx.object(gateId)],
     });
 
     const result = await client.signAndExecuteTransaction({
@@ -46,21 +33,22 @@ async function online(
         options: { showObjectChanges: true, showEffects: true },
     });
 
-    console.log("\n Storage Unit brought online successfully!");
     console.log("Transaction digest:", result.digest);
+    console.log("Extension authorized successfully for gate!");
+
     return result;
 }
 
 async function main() {
-    console.log("============= online assembly example ==============\n");
+    console.log("============= Authorize Gate Extension ==============\n");
 
     try {
         const network = (process.env.SUI_NETWORK as Network) || "localnet";
-        const exportedKey = process.env.PLAYER_A_PRIVATE_KEY || process.env.PRIVATE_KEY;
+        const exportedKey = process.env.PRIVATE_KEY;
 
         if (!exportedKey) {
             throw new Error(
-                "PLAYER_A_PRIVATE_KEY environment variable is required eg: PRIVATE_KEY=suiprivkey1..."
+                "PRIVATE_KEY environment variable is required eg: PRIVATE_KEY=suiprivkey1..."
             );
         }
 
@@ -68,12 +56,14 @@ async function main() {
         const keypair = loadKeypair(exportedKey);
         const config = getConfig(network);
 
-        const playerAddress = keypair.getPublicKey().toSuiAddress();
+        const ownerAddress = keypair.getPublicKey().toSuiAddress();
 
         console.log("Network:", network);
-        console.log("Player address:", playerAddress);
+        console.log("Owner address:", ownerAddress);
+        console.log("Gate ID:", GATE_ID);
+        console.log("Extension Package ID:", EXTENSION_PACKAGE_ID);
 
-        await online(STORAGE_UNIT_ID, client, keypair, config);
+        await authoriseExtension(GATE_ID, EXTENSION_PACKAGE_ID, client, keypair, config);
     } catch (error) {
         console.error("\n=== Error ===");
         console.error("Error:", error instanceof Error ? error.message : error);

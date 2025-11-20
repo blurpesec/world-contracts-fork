@@ -2,21 +2,24 @@
 export const NETWORKS = {
     localnet: {
         url: "http://127.0.0.1:9000",
-        packageId: "0xfac4d336b199d0aa17180f51d8ec55515a26f4e1e8c6f4ff190a697db9ca707e",
+        packageId: "0xf4ccb612f6332b0b83e93ce12fb2ada70722b3deb98fd2e0778ae8b1df6f011b",
         adminCapObjectId: "",
         characterRegisterId: "",
+        serverAddressRegistry: "",
     },
     testnet: {
         url: "https://fullnode.testnet.sui.io:443",
-        packageId: "0xe5495523cde599dc78000bef6203b19c89c00794614932dc44a34070e683a33c",
-        adminCapObjectId: "0xe459ee8fbb9691d2cc3f7b4fc31a32ccad0b2db30dc8f5d1792623a2c21b13d6",
-        characterRegisterId: "0x94e5b4ba7d9eba494f6cdda595dc7a79f7bfab0e2fc6de9d983f124cb701a7d5",
+        packageId: "0xf4ccb612f6332b0b83e93ce12fb2ada70722b3deb98fd2e0778ae8b1df6f011b",
+        adminCapObjectId: "0xe121f7c532a7e5c7be9372b25df22105790883c44daafa0dfb244af60eaec638",
+        characterRegisterId: "0x8e09b2b046a5a933d6f3da9d1a08e6ae16d7486e0f78860ba138b57283dbfb1a",
+        serverAddressRegistry: "0x62405cbcc9b0705c053648dcf0d89a8399f985d843970568c815bd05213e1101",
     },
     mainnet: {
         url: "https://fullnode.mainnet.sui.io:443",
         packageId: "0x...",
         adminCapObjectId: "",
         characterRegisterId: "",
+        serverAddressRegistry: "",
     },
 };
 
@@ -30,6 +33,7 @@ export function getConfig(network: Network = "localnet") {
 export const MODULES = {
     SIG_VERIFY: "sig_verify",
     LOCATION: "location",
+    GATE: "gate",
     STORAGE_UNIT: "storage_unit",
     CHARACTER: "character",
     AUTHORITY: "authority",

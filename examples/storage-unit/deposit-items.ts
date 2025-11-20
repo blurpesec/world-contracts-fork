@@ -7,61 +7,7 @@ import { getConfig, MODULES, Network } from "../utils/config";
 import { createClient, loadKeypair } from "../utils/client";
 
 const STORAGE_UNIT_ID = "0xf24567f0aa6aa62720c6889df730b94430c882353a3f2d324fb216e74f9b41de";
-const ITEM_OBJECT_ID = "0xb311234b640b3f9afa0faef32a45ae8f5aae09445521ba1934e901cb5187399d";
-
-async function withdrawItem(
-    storageUnit: string,
-    type_id: bigint,
-    item_id: bigint,
-    volume: bigint,
-    quantity: number,
-    client: SuiClient,
-    keypair: Ed25519Keypair,
-    config: ReturnType<typeof getConfig>
-) {
-    console.log("\n==== Move Items from from game to Chain ====");
-
-    const tx = new Transaction();
-
-    tx.moveCall({
-        target: `${config.packageId}::${MODULES.STORAGE_UNIT}::game_to_chain_inventory`,
-        arguments: [
-            tx.object(storageUnit),
-            tx.object(config.adminCapObjectId),
-            tx.pure.u64(item_id),
-            tx.pure.u64(type_id),
-            tx.pure.u64(volume),
-            tx.pure.u32(quantity),
-        ],
-    });
-
-    const result = await client.signAndExecuteTransaction({
-        transaction: tx,
-        signer: keypair,
-        options: { showEvents: true },
-    });
-
-    // Find the ItemMintedEvent and extract the item_uid
-    const mintEvent = result.events?.find((event) =>
-        event.type.endsWith("::inventory::ItemMintedEvent")
-    );
-
-    if (!mintEvent) {
-        throw new Error("ItemMintedEvent not found in transaction result");
-    }
-
-    // Type the parsed event data to access item_uid
-    const eventData = mintEvent.parsedJson as { item_uid: string };
-    const itemObjectId = eventData.item_uid;
-
-    if (!itemObjectId) {
-        throw new Error("Failed to get item UID from ItemMintedEvent");
-    }
-
-    console.log("Item minted on-chain with objectId:", itemObjectId);
-
-    console.log("Items moved on-chain: ", type_id);
-}
+const ITEM_OBJECT_ID = "0x25bd5a4c2599b8ad971153d216208e84bba2a153059174abae63ad328cd1f3f5";
 
 async function main() {
     console.log("============= Create example ==============\n");
@@ -73,8 +19,7 @@ async function main() {
 
         if (!exportedKey) {
             throw new Error(
-                "PRIVATE_KEY environment variable is required. " +
-                    "Create a .env file with PRIVATE_KEY=suiprivkey1..."
+                "PRIVATE_KEY environment variable is required eg: PRIVATE_KEY=suiprivkey1..."
             );
         }
 

@@ -53,45 +53,6 @@ async function createCharacter(
     return characterId;
 }
 
-// async function createOwnerCap(
-//     characterId: string,
-//     playerAddress: string,
-//     client: SuiClient,
-//     keypair: Ed25519Keypair,
-//     config: ReturnType<typeof getConfig>
-// ) {
-//     console.log("\n==== Creating a Owner Cap ====");
-
-//     const tx = new Transaction();
-
-//     const [ownerCap] = tx.moveCall({
-//         target: `${config.packageId}::${MODULES.AUTHORITY}::create_owner_cap`,
-//         arguments: [tx.object(config.adminCapObjectId), tx.pure.address(characterId)],
-//     });
-
-//     tx.moveCall({
-//         target: `${config.packageId}::${MODULES.AUTHORITY}::transfer_owner_cap`,
-//         arguments: [ownerCap, tx.object(config.adminCapObjectId), tx.pure.address(playerAddress)],
-//     });
-
-//     const result = await client.signAndExecuteTransaction({
-//         transaction: tx,
-//         signer: keypair,
-//         options: { showObjectChanges: true },
-//     });
-
-//     // object id of the ownerCap
-//     const ownerCapId = result.objectChanges?.find((change) => change.type === "created")?.objectId;
-//     if (!ownerCapId) {
-//         throw new Error("Failed to create character and object id was not found");
-//     }
-
-//     console.log("Character created", ownerCapId);
-
-//     console.log("Owner cap transferred to player address");
-//     console.log("\n", result.digest);
-// }
-
 async function main() {
     console.log("============= Create Character example ==============\n");
 
@@ -102,8 +63,7 @@ async function main() {
 
         if (!exportedKey) {
             throw new Error(
-                "PRIVATE_KEY environment variable is required. " +
-                    "Create a .env file with PRIVATE_KEY=suiprivkey1..."
+                "PRIVATE_KEY environment variable is required eg: PRIVATE_KEY=suiprivkey1..."
             );
         }
 

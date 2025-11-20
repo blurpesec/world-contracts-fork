@@ -7,16 +7,11 @@ import { getConfig, MODULES, Network } from "../utils/config";
 import { createClient, loadKeypair } from "../utils/client";
 import { findOwnerCapForObject } from "../utils/ownerCap";
 
-const STORAGE_UNIT_ID = "0x3036d4908afdea54f48e04ac988a8550a331a77797c671947c976d0f11c03656";
+const STORAGE_UNIT_ID = "0x6f09f1a70be5e76296a5844a6945996b1ee931b43a3a72e3db77f464f7fbffcf";
+const EXTENSION_PACKAGE_ID = "0x224a9522433fe22ad3df25628579512acf21e3f66411d1c54133a917f8523844";
 
-async function online(
-    storageUnitId: string,
-    client: SuiClient,
-    keypair: Ed25519Keypair,
-    config: ReturnType<typeof getConfig>
-) {
-    console.log("\n==== Bringing Storage Unit Online ====");
-    console.log("Storage Unit ID:", storageUnitId);
+async function authoriseExtension(storageUnitId, extensionPackageId, client, keypair, config) {
+    console.log("\n==== Authorising Extension ====");
 
     const ownerAddress = keypair.getPublicKey().toSuiAddress();
 
@@ -36,7 +31,8 @@ async function online(
     const tx = new Transaction();
 
     tx.moveCall({
-        target: `${config.packageId}::${MODULES.STORAGE_UNIT}::online`,
+        target: `${config.packageId}::${MODULES.STORAGE_UNIT}::authorize_extension`,
+        typeArguments: [`${extensionPackageId}::storage_extension::CorpseXAuth`],
         arguments: [tx.object(storageUnitId), tx.object(ownerCapId)],
     });
 
@@ -46,13 +42,24 @@ async function online(
         options: { showObjectChanges: true, showEffects: true },
     });
 
-    console.log("\n Storage Unit brought online successfully!");
-    console.log("Transaction digest:", result.digest);
-    return result;
+    console.log(result);
+
+    const devInspectResult = await client.devInspectTransactionBlock({
+        transactionBlock: tx,
+        sender: ownerAddress,
+    });
+
+    console.log("Dev inspect status:", devInspectResult.effects.status.status);
+    if (devInspectResult.effects.status.status === "failure") {
+        console.log("Dev inspect results:", devInspectResult);
+    } else {
+        console.log("Dev inspect results:", devInspectResult.results);
+        console.log("Dev inspect events:", devInspectResult.events);
+    }
 }
 
 async function main() {
-    console.log("============= online assembly example ==============\n");
+    console.log("============= Authorize Extension Example ==============\n");
 
     try {
         const network = (process.env.SUI_NETWORK as Network) || "localnet";
@@ -60,7 +67,7 @@ async function main() {
 
         if (!exportedKey) {
             throw new Error(
-                "PLAYER_A_PRIVATE_KEY environment variable is required eg: PRIVATE_KEY=suiprivkey1..."
+                "PRIVATE_KEY environment variable is required eg: PRIVATE_KEY=suiprivkey1..."
             );
         }
 
@@ -68,12 +75,14 @@ async function main() {
         const keypair = loadKeypair(exportedKey);
         const config = getConfig(network);
 
-        const playerAddress = keypair.getPublicKey().toSuiAddress();
+        const ownerAddress = keypair.getPublicKey().toSuiAddress();
 
         console.log("Network:", network);
-        console.log("Player address:", playerAddress);
+        console.log("Owner address:", ownerAddress);
+        console.log("Storage Unit ID:", STORAGE_UNIT_ID);
+        console.log("Extension Package ID:", EXTENSION_PACKAGE_ID);
 
-        await online(STORAGE_UNIT_ID, client, keypair, config);
+        await authoriseExtension(STORAGE_UNIT_ID, EXTENSION_PACKAGE_ID, client, keypair, config);
     } catch (error) {
         console.error("\n=== Error ===");
         console.error("Error:", error instanceof Error ? error.message : error);

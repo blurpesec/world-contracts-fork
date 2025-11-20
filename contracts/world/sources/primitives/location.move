@@ -213,6 +213,7 @@ fun validate_proof_message(
     assert!(message.target_location_hash == expected_location.location_hash, EInvalidLocationHash);
 }
 
+// TODO: Return reference
 /// Deserializes a LocationProof from bytes using BCS peel functions.
 ///
 /// BCS serializes structs field-by-field, so we peel each field in order:

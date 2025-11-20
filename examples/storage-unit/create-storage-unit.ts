@@ -6,6 +6,7 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getConfig, MODULES, Network } from "../utils/config";
 import { createClient, loadKeypair } from "../utils/client";
 import { createOwnerCapForObject } from "../utils/ownerCap";
+import { hexToBytes } from "../utils/helper";
 
 const STORAGE_A_TYPE_ID = BigInt(Math.floor(Math.random() * 1000000) + 5);
 const STORAGE_B_TYPE_ID = BigInt(Math.floor(Math.random() * 500) + 500);
@@ -14,20 +15,9 @@ const STORAGE_B_ITEM_ID = BigInt(Math.floor(Math.random() * 99) + 99);
 const MAX_CAPACITY = 1000000000000n;
 const LOCATION_HASH = "0x16217de8ec7330ec3eac32831df5c9cd9b21a255756a5fd5762dd7f49f6cc049";
 
-function hexToBytes(hexString: string): Uint8Array {
-    const hex = hexString.startsWith("0x") ? hexString.slice(2) : hexString;
-    const normalizedHex = hex.length % 2 === 0 ? hex : "0" + hex;
-
-    const bytes = new Uint8Array(normalizedHex.length / 2);
-    for (let i = 0; i < normalizedHex.length; i += 2) {
-        bytes[i / 2] = parseInt(normalizedHex.substring(i, i + 2), 16);
-    }
-    return bytes;
-}
-
 async function createStorageUnit(
-    type_id: bigint,
-    item_id: bigint,
+    typeId: bigint,
+    itemId: bigint,
     client: SuiClient,
     keypair: Ed25519Keypair,
     config: ReturnType<typeof getConfig>
@@ -40,8 +30,8 @@ async function createStorageUnit(
         target: `${config.packageId}::${MODULES.STORAGE_UNIT}::create_storage_unit`,
         arguments: [
             tx.object(config.adminCapObjectId),
-            tx.pure.u64(type_id),
-            tx.pure.u64(item_id),
+            tx.pure.u64(typeId),
+            tx.pure.u64(itemId),
             tx.pure.u64(MAX_CAPACITY),
             tx.pure(bcs.vector(bcs.u8()).serialize(hexToBytes(LOCATION_HASH))),
         ],
@@ -65,8 +55,6 @@ async function createStorageUnit(
     if (!storageUnitId) {
         throw new Error("Failed to create storage unit: object ID not found in transaction result");
     }
-
-    console.log("Storage unit created:", storageUnitId);
     return storageUnitId;
 }
 
@@ -79,7 +67,9 @@ async function main() {
         const playerExportedKey = process.env.PLAYER_A_PRIVATE_KEY || exportedKey;
 
         if (!exportedKey || !playerExportedKey) {
-            throw new Error("PRIVATE_KEY environment variable is required. ");
+            throw new Error(
+                "PRIVATE_KEY environment variable is required eg: PRIVATE_KEY=suiprivkey1..."
+            );
         }
 
         const client = createClient(network);
@@ -94,6 +84,7 @@ async function main() {
         console.log("Server address:", adminAddress);
         console.log("Player address (derived from key):", playerAddress);
 
+        // Create a owner inventory
         const storageUnitId = await createStorageUnit(
             STORAGE_A_TYPE_ID,
             STORAGE_A_ITEM_ID,
@@ -102,7 +93,33 @@ async function main() {
             config
         );
 
-        await createOwnerCapForObject(storageUnitId, playerAddress, client, keypair, config);
+        console.log("===========================\n");
+        console.log("Owner Inventory created:", storageUnitId);
+
+        // Create a ship inventory
+        const ShipId = await createStorageUnit(
+            STORAGE_B_TYPE_ID,
+            STORAGE_B_ITEM_ID,
+            client,
+            keypair,
+            config
+        );
+        console.log("Ship Inventory created:", ShipId);
+
+        await createOwnerCapForObject(
+            "0x6f09f1a70be5e76296a5844a6945996b1ee931b43a3a72e3db77f464f7fbffcf",
+            playerAddress,
+            client,
+            keypair,
+            config
+        );
+        await createOwnerCapForObject(
+            "0x3036d4908afdea54f48e04ac988a8550a331a77797c671947c976d0f11c03656",
+            playerAddress,
+            client,
+            keypair,
+            config
+        );
     } catch (error) {
         console.error("\n=== Error ===");
         console.error("Error:", error instanceof Error ? error.message : error);
