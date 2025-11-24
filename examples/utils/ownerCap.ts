@@ -26,9 +26,6 @@ export async function findOwnerCapForObject(
     for (const obj of ownedObjects.data) {
         if (obj.data?.content?.dataType === "moveObject") {
             const fields = obj.data.content.fields as any;
-            console.log(
-                `  - OwnerCapId ${obj.data.objectId} for object: ${fields.owned_object_id}`
-            );
             if (fields.owned_object_id === ownedObjectId) {
                 return obj.data.objectId;
             }

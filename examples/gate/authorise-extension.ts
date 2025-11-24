@@ -5,8 +5,8 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getConfig, MODULES, Network } from "../utils/config";
 import { createClient, loadKeypair } from "../utils/client";
 
-const GATE_ID = "0x5cf64c96cfe536fbe2213d69f9ebb0b464fd225c1c31b2dc0ffe60ccc5f32242";
-const EXTENSION_PACKAGE_ID = "0x224a9522433fe22ad3df25628579512acf21e3f66411d1c54133a917f8523844";
+const GATE_ID = "0xb4a7a5ff9ee205b4be67db5d61506b8d0d0a4fc85d5cd78e3f73d7161f9ab3dd";
+const EXTENSION_PACKAGE_ID = "0x7e14978d020b162690f550385f8a347a732e73e70190ecc4fe0c7091507590c2";
 
 async function authoriseExtension(
     gateId: string,
@@ -15,7 +15,7 @@ async function authoriseExtension(
     keypair: Ed25519Keypair,
     config: ReturnType<typeof getConfig>
 ) {
-    console.log("\n==== Authorising Extension for Gate ====");
+    console.log("\n==== Customising Gate ====");
 
     const ownerAddress = keypair.getPublicKey().toSuiAddress();
 

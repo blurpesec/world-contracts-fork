@@ -5,8 +5,13 @@ use sui::{coin::{Self, TreasuryCap}, url};
 
 public struct BUILDER_TOKEN has drop {}
 
+public struct Treasury has key {
+    id: UID,
+    cap: TreasuryCap<BUILDER_TOKEN>,
+}
+
 fun init(witness: BUILDER_TOKEN, ctx: &mut TxContext) {
-    let (mut treasury, metadata) = coin::create_currency<BUILDER_TOKEN>(
+    let (mut treasury_cap, metadata) = coin::create_currency<BUILDER_TOKEN>(
         witness,
         9,
         b"SLAY",
@@ -16,11 +21,15 @@ fun init(witness: BUILDER_TOKEN, ctx: &mut TxContext) {
         ctx,
     );
 
-    // An initial supply of tokens
-    mint(&mut treasury, 1_000_000_000 * 1_00, ctx.sender(), ctx);
+    mint(&mut treasury_cap, 1_000_000_000 * 1_00, ctx.sender(), ctx);
+
+    let treasury = Treasury {
+        id: object::new(ctx),
+        cap: treasury_cap,
+    };
 
     transfer::public_freeze_object(metadata);
-    transfer::public_transfer(treasury, ctx.sender())
+    transfer::share_object(treasury);
 }
 
 public(package) fun mint(
@@ -31,4 +40,8 @@ public(package) fun mint(
 ) {
     let coin = coin::mint(treasury_cap, amount, ctx);
     transfer::public_transfer(coin, recipient);
+}
+
+public fun borrow_cap_mut(treasury: &mut Treasury): &mut TreasuryCap<BUILDER_TOKEN> {
+    &mut treasury.cap
 }

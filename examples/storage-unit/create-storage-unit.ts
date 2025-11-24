@@ -7,6 +7,7 @@ import { getConfig, MODULES, Network } from "../utils/config";
 import { createClient, loadKeypair } from "../utils/client";
 import { createOwnerCapForObject } from "../utils/ownerCap";
 import { hexToBytes } from "../utils/helper";
+import { online } from "./online";
 
 const STORAGE_A_TYPE_ID = BigInt(Math.floor(Math.random() * 1000000) + 5);
 const STORAGE_B_TYPE_ID = BigInt(Math.floor(Math.random() * 500) + 500);
@@ -15,6 +16,8 @@ const STORAGE_B_ITEM_ID = BigInt(Math.floor(Math.random() * 99) + 99);
 const MAX_CAPACITY = 1000000000000n;
 const LOCATION_HASH = "0x16217de8ec7330ec3eac32831df5c9cd9b21a255756a5fd5762dd7f49f6cc049";
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function createStorageUnit(
     typeId: bigint,
     itemId: bigint,
@@ -22,7 +25,7 @@ async function createStorageUnit(
     keypair: Ed25519Keypair,
     config: ReturnType<typeof getConfig>
 ): Promise<string> {
-    console.log("\n==== Creating a Storage Unit ====");
+    console.log("\n==== Creating Storage Unit ====");
 
     const tx = new Transaction();
 
@@ -93,10 +96,8 @@ async function main() {
             config
         );
 
-        console.log("===========================\n");
-        console.log("Owner Inventory created:", storageUnitId);
+        await sleep(1000);
 
-        // Create a ship inventory
         const ShipId = await createStorageUnit(
             STORAGE_B_TYPE_ID,
             STORAGE_B_ITEM_ID,
@@ -104,22 +105,19 @@ async function main() {
             keypair,
             config
         );
-        console.log("Ship Inventory created:", ShipId);
+        await sleep(1000);
 
-        await createOwnerCapForObject(
-            "0x6f09f1a70be5e76296a5844a6945996b1ee931b43a3a72e3db77f464f7fbffcf",
-            playerAddress,
-            client,
-            keypair,
-            config
-        );
-        await createOwnerCapForObject(
-            "0x3036d4908afdea54f48e04ac988a8550a331a77797c671947c976d0f11c03656",
-            playerAddress,
-            client,
-            keypair,
-            config
-        );
+        await createOwnerCapForObject(storageUnitId, playerAddress, client, keypair, config);
+
+        await sleep(1000);
+
+        await createOwnerCapForObject(ShipId, playerAddress, client, keypair, config);
+
+        await sleep(1000);
+
+        console.log("===========================\n");
+        console.log("Owner Inventory created:", storageUnitId);
+        console.log("Ship Inventory created:", ShipId);
     } catch (error) {
         console.error("\n=== Error ===");
         console.error("Error:", error instanceof Error ? error.message : error);

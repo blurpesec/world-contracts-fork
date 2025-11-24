@@ -1,16 +1,14 @@
 /// 3rd Party extension
 module extension::gate_extension;
 
-use extension::builder_token::{Self, BUILDER_TOKEN};
-use sui::{coin::{Self, TreasuryCap}, event};
+use extension::builder_token::{Self, BUILDER_TOKEN, Treasury};
+use sui::{coin, event};
 use world::gate::{Self, Gate};
 
 const JUMP_FEE: u64 = 100_000_000; // 0.1 SLAY tokens
 
-// === Errors ===
 const EInsufficientTokens: u64 = 0;
 
-// === Structs ===
 public struct GateXAuth has drop {}
 
 public struct GateJumpedEvent has copy, drop {
@@ -20,20 +18,20 @@ public struct GateJumpedEvent has copy, drop {
     fee_paid: u64,
 }
 
-// === Public Functions ===
-
 /// Jump between gates by paying SLAY tokens
 /// Requires user to own at least JUMP_FEE amount of SLAY tokens
+#[allow(lint(self_transfer))]
 public fun jump(
     source_gate: &Gate,
     destination_gate: &Gate,
     mut payment: coin::Coin<BUILDER_TOKEN>,
-    treasury: &mut coin::TreasuryCap<BUILDER_TOKEN>,
+    treasury: &mut Treasury,
     ctx: &mut TxContext,
 ): bool {
     assert!(coin::value(&payment) >= JUMP_FEE, EInsufficientTokens);
     let fee_coin = coin::split(&mut payment, JUMP_FEE, ctx);
-    coin::burn(treasury, fee_coin);
+
+    coin::burn(builder_token::borrow_cap_mut(treasury), fee_coin);
 
     if (coin::value(&payment) > 0) {
         transfer::public_transfer(payment, ctx.sender());

@@ -1,15 +1,14 @@
 import "dotenv/config";
 import { Transaction } from "@mysten/sui/transactions";
-import { bcs } from "@mysten/sui/bcs";
 import { SuiClient } from "@mysten/sui/client";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getConfig, MODULES, Network } from "../utils/config";
 import { createClient, loadKeypair } from "../utils/client";
 import { findOwnerCapForObject } from "../utils/ownerCap";
 
-const STORAGE_UNIT_ID = "0x3036d4908afdea54f48e04ac988a8550a331a77797c671947c976d0f11c03656";
+const STORAGE_UNIT_ID = "0xc41971f090c145b2258bc0917400d6b5773b1290f5ea67392914d19a13f3b982";
 
-async function online(
+export async function online(
     storageUnitId: string,
     client: SuiClient,
     keypair: Ed25519Keypair,

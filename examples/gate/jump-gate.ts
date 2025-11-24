@@ -7,10 +7,10 @@ import { getConfig, MODULES, Network } from "../utils/config";
 import { createClient, loadKeypair } from "../utils/client";
 import { hexToBytes } from "../utils/helper";
 
-const GATE_A_ID = "0x5cf64c96cfe536fbe2213d69f9ebb0b464fd225c1c31b2dc0ffe60ccc5f32242";
-const GATE_B_ID = "0x7d29f93f14c95c445caaabe4ef8b36e0802e3879d48c960c0b981ff402b6ac1d";
-const EXTENSION_PACKAGE_ID = "0x224a9522433fe22ad3df25628579512acf21e3f66411d1c54133a917f8523844";
-const TREASURY_CAP_ID = "0x0d2c582a35a6b3959857ba63dcde18b17850084d3878ae3bd248239aa868a48d";
+const GATE_A_ID = "0xb4a7a5ff9ee205b4be67db5d61506b8d0d0a4fc85d5cd78e3f73d7161f9ab3dd";
+const GATE_B_ID = "0xddbfce7ef9cbf43c25122fd654430cf178b4b1fec1aada249b8b0647a280ca23";
+const EXTENSION_PACKAGE_ID = "0x7e14978d020b162690f550385f8a347a732e73e70190ecc4fe0c7091507590c2";
+const TREASURY_CAP_ID = "0x3eee3bb39cc9a29a85a3b99d4abf1f398127ec2f5b70fd469f7c095b52c302b5";
 
 async function jump(
     gateAId: string,
@@ -33,13 +33,15 @@ async function jump(
     });
 
     if (coins.data.length === 0) {
-        throw new Error("No SLAY tokens found. You need SLAY tokens to jump!");
+        throw new Error(
+            "The Gate refuses to activate! You lack the Builder's Token required to traverse the void between worlds."
+        );
     }
 
     console.log(`Found ${coins.data.length} SLAY coin(s)`);
     const slayCoinId = coins.data[0].coinObjectId;
 
-    const canJump = tx.moveCall({
+    tx.moveCall({
         target: `${extensionPackageId}::gate_extension::jump`,
         arguments: [
             tx.object(gateAId),

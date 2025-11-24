@@ -16,15 +16,15 @@
     "create-character": "tsx examples/character/create-character.ts",
     "create-storage-unit": "tsx examples/storage-unit/create-storage-unit.ts",
     "online": "tsx examples/storage-unit/online.ts",
-    "game-item-to-chain": "tsx examples/storage-unit/game-item-to-chain.ts",
+    "deposit-corpse": "tsx examples/storage-unit/game-item-to-chain.ts",
     "chain-item-to-game": "tsx examples/storage-unit/chain-item-to-game.ts",
     "deposit-items": "tsx examples/storage-unit/deposit-items.ts",
     "withdraw-items": "tsx examples/storage-unit/withdraw-items.ts",
-    "authorise-extension": "tsx examples/storage-unit/authorise-extension.ts",
+    "customise-storage-unit": "tsx examples/storage-unit/authorise-extension.ts",
     "interact": "tsx examples/storage-unit/interact-builder-extension.ts",
     "create-gate": "tsx examples/gate/create-gate.ts",
     "link-gate": "tsx examples/gate/link-gate.ts",
-    "authorise-gate-extension": "tsx examples/gate/authorise-extension.ts",
+    "customise-gate": "tsx examples/gate/authorise-extension.ts",
     "jump": "tsx examples/gate/jump-gate.ts"
   },
   "dependencies": {

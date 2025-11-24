@@ -6,7 +6,7 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getConfig, MODULES, Network } from "../utils/config";
 import { createClient, loadKeypair } from "../utils/client";
 
-const SHIP_INVENTORY_ID = "0x3036d4908afdea54f48e04ac988a8550a331a77797c671947c976d0f11c03656";
+const SHIP_INVENTORY_ID = "0xc41971f090c145b2258bc0917400d6b5773b1290f5ea67392914d19a13f3b982";
 
 const ITEM_A_TYPE_ID = BigInt(Math.floor(Math.random() * 1000000) + 5);
 const CORPSE_ITEM_ID = 566789n;
@@ -58,14 +58,14 @@ async function gameItemToChain(
         throw new Error("Failed to get item UID from ItemMintedEvent");
     }
 
-    console.log("Item minted on-chain with objectId:", itemObjectId);
+    console.log("Corpse objectId:", itemObjectId);
 
     console.log("TypeId of the item: ", typeId);
     console.log("ItemId of the item: ", itemId);
 }
 
 async function main() {
-    console.log("============= Create example ==============\n");
+    console.log("============= Deposit Corse ==============\n");
 
     try {
         const network = (process.env.SUI_NETWORK as Network) || "localnet";

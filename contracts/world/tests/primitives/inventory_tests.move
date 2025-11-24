@@ -468,7 +468,7 @@ fun mint_items_fail_empty_item_id() {
             .mint_items(
                 status_ref,
                 &admin_cap,
-                0,
+                0, //
                 AMMO_TYPE_ID,
                 AMMO_VOLUME,
                 AMMO_QUANTITY,

@@ -14,6 +14,8 @@ const GATE_B_ITEM_ID = BigInt(Math.floor(Math.random() * 5675765) + 88);
 const LOCATION_HASH = "0x16217de8ec7330ec3eac32831df5c9cd9b21a255756a5fd5762dd7f49f6cc049";
 const MAX_JUMP_DISTANCE = 10000000n;
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function createGate(
     typeId: bigint,
     itemId: bigint,
@@ -62,7 +64,7 @@ async function createGate(
 }
 
 async function main() {
-    console.log("============= Create Gate Creation example ==============\n");
+    console.log("============= Gate Creation example ==============\n");
 
     try {
         const network = (process.env.SUI_NETWORK as Network) || "localnet";
@@ -91,6 +93,9 @@ async function main() {
             keypair,
             config
         );
+
+        await sleep(1000);
+
         const gateB = await createGate(
             GATE_B_TYPE_ID,
             GATE_B_ITEM_ID,

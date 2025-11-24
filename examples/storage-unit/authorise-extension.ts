@@ -1,17 +1,14 @@
 import "dotenv/config";
 import { Transaction } from "@mysten/sui/transactions";
-import { bcs } from "@mysten/sui/bcs";
-import { SuiClient } from "@mysten/sui/client";
-import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getConfig, MODULES, Network } from "../utils/config";
 import { createClient, loadKeypair } from "../utils/client";
 import { findOwnerCapForObject } from "../utils/ownerCap";
 
-const STORAGE_UNIT_ID = "0x6f09f1a70be5e76296a5844a6945996b1ee931b43a3a72e3db77f464f7fbffcf";
-const EXTENSION_PACKAGE_ID = "0x224a9522433fe22ad3df25628579512acf21e3f66411d1c54133a917f8523844";
+const STORAGE_UNIT_ID = "0x24f58d2a20bfd1b8228f9e4a661d80150b79c867f48ed8945d1bcad11278d485";
+const EXTENSION_PACKAGE_ID = "0x7e14978d020b162690f550385f8a347a732e73e70190ecc4fe0c7091507590c2";
 
 async function authoriseExtension(storageUnitId, extensionPackageId, client, keypair, config) {
-    console.log("\n==== Authorising Extension ====");
+    console.log("\n==== Customising Storage Unit ====");
 
     const ownerAddress = keypair.getPublicKey().toSuiAddress();
 
@@ -59,7 +56,7 @@ async function authoriseExtension(storageUnitId, extensionPackageId, client, key
 }
 
 async function main() {
-    console.log("============= Authorize Extension Example ==============\n");
+    console.log("===========================\n");
 
     try {
         const network = (process.env.SUI_NETWORK as Network) || "localnet";
