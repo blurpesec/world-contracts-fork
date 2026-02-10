@@ -5,7 +5,7 @@ module world::character_tests;
 use std::{string::utf8, unit_test::assert_eq};
 use sui::{derived_object, test_scenario as ts};
 use world::{
-    access::{Self, AdminCap, OwnerCap, ReturnOwnerCapReceipt},
+    access::{Self, AdminCap, OwnerCap},
     character::{Self, Character},
     in_game_id as character_id,
     object_registry::{Self, ObjectRegistry},

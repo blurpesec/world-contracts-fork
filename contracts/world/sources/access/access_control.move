@@ -287,6 +287,11 @@ fun validate_return_receipt(receipt: ReturnOwnerCapReceipt, owner_id: address, o
 }
 
 #[test_only]
+public fun destroy_receipt_for_testing(receipt: ReturnOwnerCapReceipt) {
+    let ReturnOwnerCapReceipt { owner_id: _, owner_cap_id: _ } = receipt;
+}
+
+#[test_only]
 public fun init_for_testing(ctx: &mut TxContext) {
     init(ctx);
 }

@@ -11,6 +11,27 @@ use world::{
     world::{Self, GovernorCap}
 };
 
+fun setup_character_for_receipt_tests(ts: &mut ts::Scenario) {
+    ts::next_tx(ts, admin());
+    {
+        let admin_cap = ts::take_from_sender<AdminCap>(ts);
+        let mut registry = ts::take_shared<ObjectRegistry>(ts);
+        let character = character::create_character(
+            &mut registry,
+            &admin_cap,
+            2000,
+            b"TEST".to_string(),
+            100,
+            user_a(),
+            b"name".to_string(),
+            ts.ctx(),
+        );
+        character::share_character(character, &admin_cap);
+        ts::return_shared(registry);
+        ts::return_to_sender(ts, admin_cap);
+    };
+}
+
 /// Tests creating and deleting an admin cap
 /// Scenario: Governor creates an admin cap for an admin, then deletes it
 /// Expected: Admin cap is created successfully and can be deleted by governor
@@ -173,6 +194,84 @@ fun character_owner_cap_transfer_fail() {
             ts.ctx(),
         );
         access::transfer_owner_cap_with_receipt<Character>(user_b(), owner_cap, receipt, ts.ctx());
+    };
+    abort
+}
+
+/// Mismatched receipt (wrong owner_cap_id) for transfer_owner_cap_with_receipt aborts with EOwnerCapIdMismatch.
+#[test]
+#[expected_failure(abort_code = access::EOwnerCapIdMismatch)]
+fun transfer_owner_cap_with_receipt_mismatched_cap_id_fails() {
+    let mut ts = ts::begin(governor());
+    test_helpers::setup_world(&mut ts);
+    setup_character_for_receipt_tests(&mut ts);
+
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut character = ts::take_shared<Character>(&ts);
+        let character_addr = object::id_address(&character);
+        let ticket = ts::most_recent_receiving_ticket<OwnerCap<Character>>(&object::id(&character));
+        let (owner_cap, real_receipt) = character.borrow_owner_cap<Character>(ticket, ts.ctx());
+        ts::return_shared(character);
+
+        access::destroy_receipt_for_testing(real_receipt);
+        let wrong_cap_id = object::id_from_address(@0x1);
+        let fake_receipt = access::create_return_receipt(character_addr, wrong_cap_id);
+        access::transfer_owner_cap_with_receipt<Character>(
+            user_b(),
+            owner_cap,
+            fake_receipt,
+            ts.ctx(),
+        );
+    };
+    abort
+}
+
+/// Mismatched receipt (wrong owner_id) for return_owner_cap_to_object aborts with EOwnerIdMismatch.
+#[test]
+#[expected_failure(abort_code = access::EOwnerIdMismatch)]
+fun return_owner_cap_to_object_mismatched_owner_id_fails() {
+    let mut ts = ts::begin(governor());
+    test_helpers::setup_world(&mut ts);
+    setup_character_for_receipt_tests(&mut ts);
+
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut character = ts::take_shared<Character>(&ts);
+        let character_addr = object::id_address(&character);
+        let ticket = ts::most_recent_receiving_ticket<OwnerCap<Character>>(&object::id(&character));
+        let (owner_cap, real_receipt) = character.borrow_owner_cap<Character>(ticket, ts.ctx());
+        ts::return_shared(character);
+
+        access::destroy_receipt_for_testing(real_receipt);
+        let fake_receipt = access::create_return_receipt(@0x1, object::id(&owner_cap));
+        access::return_owner_cap_to_object(character_addr, owner_cap, fake_receipt);
+    };
+    abort
+}
+
+/// Mismatched receipt (wrong owner_cap_id) for return_owner_cap_to_object aborts with EOwnerCapIdMismatch.
+#[test]
+#[expected_failure(abort_code = access::EOwnerCapIdMismatch)]
+fun return_owner_cap_to_object_mismatched_cap_id_fails() {
+    let mut ts = ts::begin(governor());
+    test_helpers::setup_world(&mut ts);
+    setup_character_for_receipt_tests(&mut ts);
+
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut character = ts::take_shared<Character>(&ts);
+        let character_addr = object::id_address(&character);
+        let ticket = ts::most_recent_receiving_ticket<OwnerCap<Character>>(&object::id(&character));
+        let (owner_cap, real_receipt) = character.borrow_owner_cap<Character>(ticket, ts.ctx());
+        ts::return_shared(character);
+
+        access::destroy_receipt_for_testing(real_receipt);
+        let fake_receipt = access::create_return_receipt(
+            character_addr,
+            object::id_from_address(@0x1),
+        );
+        access::return_owner_cap_to_object(character_addr, owner_cap, fake_receipt);
     };
     abort
 }
