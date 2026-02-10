@@ -9,6 +9,7 @@ set -euo pipefail
 DELAY_SECONDS="${DELAY_SECONDS:-${1:-2}}"
 
 commands=(
+  "extract-object-ids"
   "setup-access"
   "configure-fuel-energy"
   "create-character"
