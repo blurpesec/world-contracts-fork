@@ -435,7 +435,7 @@ public fun anchor(
     };
 
     network_node.connect_assembly(gate_id);
-    owner_cap.transfer_owner_cap(object::id_address(character));
+    access::transfer_owner_cap(object::id_address(character), owner_cap);
 
     event::emit(GateCreatedEvent {
         assembly_id: gate_id,

@@ -254,7 +254,7 @@ public fun anchor(
         connected_assembly_ids: vector[],
     };
 
-    access::transfer_owner_cap(owner_cap, object::id_address(character));
+    access::transfer_owner_cap(object::id_address(character), owner_cap);
 
     event::emit(NetworkNodeCreatedEvent {
         network_node_id: nwn_id,

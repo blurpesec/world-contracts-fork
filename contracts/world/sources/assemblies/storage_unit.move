@@ -376,7 +376,7 @@ public fun anchor(
         extension: option::none(),
     };
 
-    access::transfer_owner_cap(owner_cap, object::id_address(character));
+    access::transfer_owner_cap(object::id_address(character), owner_cap);
 
     network_node.connect_assembly(assembly_id);
 

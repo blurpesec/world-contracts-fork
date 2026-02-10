@@ -152,7 +152,7 @@ public fun anchor(
         ),
     };
 
-    access::transfer_owner_cap(owner_cap, object::id_address(character));
+    access::transfer_owner_cap(object::id_address(character), owner_cap);
 
     // Connect assembly to network node
     network_node.connect_assembly(assembly_id);

@@ -118,7 +118,7 @@ public fun create_character(
         owner_cap_id,
     };
 
-    access::transfer_owner_cap(owner_cap, object::id_address(&character));
+    access::transfer_owner_cap(object::id_address(&character), owner_cap);
 
     event::emit(CharacterCreatedEvent {
         character_id: object::id(&character),
@@ -135,16 +135,24 @@ public fun borrow_owner_cap<T: key>(
     character: &mut Character,
     owner_cap_ticket: Receiving<OwnerCap<T>>,
     ctx: &TxContext,
-): OwnerCap<T> {
+): (OwnerCap<T>, access::ReturnOwnerCapReceipt) {
     assert!(character.character_address == ctx.sender(), ESenderCannotAccessCharacter);
 
     let owner_cap = access::receive_owner_cap(&mut character.id, owner_cap_ticket);
-    owner_cap
+    let return_receipt = access::create_return_receipt(
+        object::id_address(character),
+        object::id(&owner_cap),
+    );
+    (owner_cap, return_receipt)
 }
 
 // return owner cap to character
-public fun return_owner_cap<T: key>(character: &Character, owner_cap: OwnerCap<T>) {
-    access::transfer_owner_cap(owner_cap, object::id_address(character));
+public fun return_owner_cap<T: key>(
+    character: &Character,
+    owner_cap: OwnerCap<T>,
+    receipt: access::ReturnOwnerCapReceipt,
+) {
+    access::return_owner_cap_to_object(object::id_address(character), owner_cap, receipt);
 }
 
 public fun share_character(character: Character, _: &AdminCap) {

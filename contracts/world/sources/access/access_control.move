@@ -23,6 +23,21 @@ const ECharacterTransfer: vector<u8> = b"Character cannot be transferred";
 const EUnauthorizedSponsor: vector<u8> = b"Unauthorized sponsor";
 #[error(code = 2)]
 const ETransactionNotSponsored: vector<u8> = b"Transaction not sponsored";
+#[error(code = 3)]
+const EOwnerIdMismatch: vector<u8> = b"Owner ID mismatch";
+#[error(code = 4)]
+const EOwnerCapIdMismatch: vector<u8> = b"Owner Cap ID mismatch";
+
+/// Proof that an owner cap was borrowed from an object; must be used to either return or transfer the cap.
+public struct ReturnOwnerCapReceipt {
+    owner_id: address,
+    owner_cap_id: ID,
+}
+
+/// Creates a return receipt. Consumed by return_owner_cap_to_object or transfer_owner_cap_with_receipt.
+public fun create_return_receipt(owner_id: address, owner_cap_id: ID): ReturnOwnerCapReceipt {
+    ReturnOwnerCapReceipt { owner_id, owner_cap_id }
+}
 
 public struct AdminACL has key {
     id: UID,
@@ -93,19 +108,41 @@ fun init(ctx: &mut TxContext) {
 /// Security: Ownership is enforced by the Sui runtime. Only the current owner of the OwnerCap
 /// can call this function - if a non-owner attempts to move the object, the transaction will
 /// be rejected by the runtime before this function is even called.
-public fun transfer_owner_cap<T: key>(owner_cap: OwnerCap<T>, owner: address) {
+public fun transfer_owner_cap<T: key>(owner: address, owner_cap: OwnerCap<T>) {
     transfer::transfer(owner_cap, owner);
 }
 
 public fun transfer_owner_cap_to_address<T: key>(
-    owner_cap: OwnerCap<T>,
     new_owner: address,
+    owner_cap: OwnerCap<T>,
     ctx: &mut TxContext,
 ) {
     let type_name: TypeName = type_name::with_defining_ids<T>();
     let str: &String = type_name.as_string();
     assert!(str == &std::ascii::string(b"Character"), ECharacterTransfer);
     transfer<T>(owner_cap, ctx.sender(), new_owner);
+}
+
+/// Returns a borrowed owner cap to the object it was borrowed from. Consumes the receipt.
+public fun return_owner_cap_to_object<T: key>(
+    owner_id: address,
+    owner_cap: OwnerCap<T>,
+    receipt: ReturnOwnerCapReceipt,
+) {
+    validate_return_receipt(receipt, owner_id, object::id(&owner_cap));
+    transfer_owner_cap(owner_id, owner_cap);
+}
+
+/// Transfers a borrowed owner cap to an address, consuming the return receipt.
+public fun transfer_owner_cap_with_receipt<T: key>(
+    new_owner: address,
+    owner_cap: OwnerCap<T>,
+    receipt: ReturnOwnerCapReceipt,
+    ctx: &mut TxContext,
+) {
+    let ReturnOwnerCapReceipt { owner_id: _, owner_cap_id: receipt_owner_cap_id } = receipt;
+    assert!(receipt_owner_cap_id == object::id(&owner_cap), EOwnerCapIdMismatch);
+    transfer_owner_cap_to_address(new_owner, owner_cap, ctx);
 }
 
 // === View Functions ===
@@ -238,6 +275,15 @@ fun transfer<T: key>(owner_cap: OwnerCap<T>, previous_owner: address, new_owner:
         owner: new_owner,
     });
     transfer::transfer(owner_cap, new_owner);
+}
+
+fun validate_return_receipt(receipt: ReturnOwnerCapReceipt, owner_id: address, owner_cap_id: ID) {
+    let ReturnOwnerCapReceipt {
+        owner_id: receipt_owner_id,
+        owner_cap_id: receipt_owner_cap_id,
+    } = receipt;
+    assert!(receipt_owner_id == owner_id, EOwnerIdMismatch);
+    assert!(receipt_owner_cap_id == owner_cap_id, EOwnerCapIdMismatch);
 }
 
 #[test_only]
