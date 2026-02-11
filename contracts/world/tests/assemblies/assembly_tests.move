@@ -474,7 +474,10 @@ fun test_update_energy_source_fail_tenant_mismatch() {
 
     // Assembly under DIFFERENT tenant (anchored to its own NWN)
     let character_diff_id = create_character_with_tenant(
-        &mut ts, user_b(), 502, DIFFERENT_TENANT.to_string(),
+        &mut ts,
+        user_b(),
+        502,
+        DIFFERENT_TENANT.to_string(),
     );
     let nwn_diff_id = create_network_node(&mut ts, character_diff_id);
     let assembly_diff_id = create_assembly(&mut ts, nwn_diff_id, character_diff_id);
@@ -506,7 +509,10 @@ fun test_update_energy_source_connected_fail_tenant_mismatch() {
     let nwn_test_id = create_network_node(&mut ts, character_test_id);
 
     let character_diff_id = create_character_with_tenant(
-        &mut ts, user_b(), 602, DIFFERENT_TENANT.to_string(),
+        &mut ts,
+        user_b(),
+        602,
+        DIFFERENT_TENANT.to_string(),
     );
     let nwn_diff_id = create_network_node(&mut ts, character_diff_id);
     let assembly_diff_id = create_assembly(&mut ts, nwn_diff_id, character_diff_id);
@@ -518,7 +524,11 @@ fun test_update_energy_source_connected_fail_tenant_mismatch() {
         let mut assembly_obj = ts::take_shared_by_id<Assembly>(&ts, assembly_diff_id);
         let admin_cap = ts::take_from_sender<AdminCap>(&ts);
 
-        let update = network_node::connect_assemblies(&mut nwn, &admin_cap, vector[assembly_diff_id]);
+        let update = network_node::connect_assemblies(
+            &mut nwn,
+            &admin_cap,
+            vector[assembly_diff_id],
+        );
         let update = assembly_obj.update_energy_source_connected_assembly(update, &nwn, &admin_cap);
         network_node::destroy_update_energy_sources(update);
 

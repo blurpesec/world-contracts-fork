@@ -1086,7 +1086,10 @@ fun test_link_gates_fail_tenant_mismatch() {
 
     // Gate B under DIFFERENT tenant (same user so borrow_owner_cap works in one tx)
     let character_b_id = create_character_with_tenant(
-        &mut ts, user_a(), 202, DIFFERENT_TENANT.to_string(),
+        &mut ts,
+        user_a(),
+        202,
+        DIFFERENT_TENANT.to_string(),
     );
     let nwn_b_id = create_network_node(&mut ts, character_b_id);
     let gate_b_id = create_gate(&mut ts, character_b_id, nwn_b_id, GATE_ITEM_ID_2);
@@ -1156,7 +1159,10 @@ fun test_update_energy_source_fail_tenant_mismatch() {
 
     // Gate under DIFFERENT tenant (anchored to its own NWN)
     let character_diff_id = create_character_with_tenant(
-        &mut ts, user_b(), 302, DIFFERENT_TENANT.to_string(),
+        &mut ts,
+        user_b(),
+        302,
+        DIFFERENT_TENANT.to_string(),
     );
     let nwn_diff_id = create_network_node(&mut ts, character_diff_id);
     let gate_diff_id = create_gate(&mut ts, character_diff_id, nwn_diff_id, GATE_ITEM_ID_1);
@@ -1188,7 +1194,10 @@ fun test_update_energy_source_connected_gate_fail_tenant_mismatch() {
     let nwn_test_id = create_network_node(&mut ts, character_test_id);
 
     let character_diff_id = create_character_with_tenant(
-        &mut ts, user_b(), 402, DIFFERENT_TENANT.to_string(),
+        &mut ts,
+        user_b(),
+        402,
+        DIFFERENT_TENANT.to_string(),
     );
     let nwn_diff_id = create_network_node(&mut ts, character_diff_id);
     let gate_diff_id = create_gate(&mut ts, character_diff_id, nwn_diff_id, GATE_ITEM_ID_1);

@@ -60,7 +60,6 @@ module world::item_balance;
 
 use std::string::String;
 use sui::{derived_object, dynamic_field as df, event, table::{Self, Table}};
-// NOTE: Table is still used for `asset_ids` reverse lookup.
 use world::{access::AdminCap, in_game_id::{Self, TenantTypeId}};
 
 // === Errors ===
@@ -242,10 +241,15 @@ public fun is_type_registered(registry: &ItemRegistry, type_id: u64, tenant: Str
 
 // Accessors on ItemData
 public fun data_asset_id(data: &ItemData): ID { data.asset_id }
+
 public fun data_key(data: &ItemData): TenantTypeId { data.key }
+
 public fun data_name(data: &ItemData): String { data.name }
+
 public fun data_volume(data: &ItemData): u64 { data.volume }
+
 public fun data_mass(data: &ItemData): u64 { data.mass }
+
 public fun data_url(data: &ItemData): String { data.url }
 
 /// Convenience: look up per-unit volume for an asset directly.
@@ -256,6 +260,7 @@ public fun volume(registry: &ItemRegistry, asset_id: ID): u64 {
 // === Balance API (public) ===
 
 public fun balance_asset_id(b: &ItemBalance): ID { b.asset_id }
+
 public fun value(b: &ItemBalance): u64 { b.value }
 
 /// Consume a balance and return its `(asset_id, value)` parts.
@@ -336,11 +341,7 @@ public fun init_for_testing(ctx: &mut TxContext) {
 }
 
 #[test_only]
-public fun test_increase_supply(
-    registry: &ItemRegistry,
-    asset_id: ID,
-    value: u64,
-): ItemBalance {
+public fun test_increase_supply(registry: &ItemRegistry, asset_id: ID, value: u64): ItemBalance {
     increase_supply(registry, asset_id, value)
 }
 

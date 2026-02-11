@@ -135,16 +135,17 @@ public fun register_fuel_item(ts: &mut ts::Scenario): ID {
     {
         let admin_cap = ts::take_from_sender<AdminCap>(ts);
         let mut item_registry = ts::take_shared<ItemRegistry>(ts);
-        asset_id = item_balance::register_item_type(
-            &mut item_registry,
-            &admin_cap,
-            FUEL_TYPE_1,
-            tenant(),
-            b"Fuel Type 1".to_string(),
-            FUEL_ITEM_VOLUME,
-            0,
-            b"".to_string(),
-        );
+        asset_id =
+            item_balance::register_item_type(
+                &mut item_registry,
+                &admin_cap,
+                FUEL_TYPE_1,
+                tenant(),
+                b"Fuel Type 1".to_string(),
+                FUEL_ITEM_VOLUME,
+                0,
+                b"".to_string(),
+            );
         ts::return_shared(item_registry);
         ts::return_to_sender(ts, admin_cap);
     };
@@ -158,16 +159,17 @@ public fun register_fuel_item_2(ts: &mut ts::Scenario): ID {
     {
         let admin_cap = ts::take_from_sender<AdminCap>(ts);
         let mut item_registry = ts::take_shared<ItemRegistry>(ts);
-        asset_id = item_balance::register_item_type(
-            &mut item_registry,
-            &admin_cap,
-            FUEL_TYPE_2,
-            tenant(),
-            b"Fuel Type 2".to_string(),
-            FUEL_ITEM_VOLUME,
-            0,
-            b"".to_string(),
-        );
+        asset_id =
+            item_balance::register_item_type(
+                &mut item_registry,
+                &admin_cap,
+                FUEL_TYPE_2,
+                tenant(),
+                b"Fuel Type 2".to_string(),
+                FUEL_ITEM_VOLUME,
+                0,
+                b"".to_string(),
+            );
         ts::return_shared(item_registry);
         ts::return_to_sender(ts, admin_cap);
     };
@@ -181,16 +183,17 @@ public fun register_ammo_item(ts: &mut ts::Scenario): ID {
     {
         let admin_cap = ts::take_from_sender<AdminCap>(ts);
         let mut item_registry = ts::take_shared<ItemRegistry>(ts);
-        asset_id = item_balance::register_item_type(
-            &mut item_registry,
-            &admin_cap,
-            AMMO_TYPE_ID,
-            tenant(),
-            b"Ammo".to_string(),
-            AMMO_VOLUME,
-            0,
-            b"".to_string(),
-        );
+        asset_id =
+            item_balance::register_item_type(
+                &mut item_registry,
+                &admin_cap,
+                AMMO_TYPE_ID,
+                tenant(),
+                b"Ammo".to_string(),
+                AMMO_VOLUME,
+                0,
+                b"".to_string(),
+            );
         ts::return_shared(item_registry);
         ts::return_to_sender(ts, admin_cap);
     };

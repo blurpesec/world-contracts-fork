@@ -1233,16 +1233,17 @@ fun register_fuel_item_with_tenant(ts: &mut ts::Scenario, item_tenant: String): 
     {
         let admin_cap = ts::take_from_sender<AdminCap>(ts);
         let mut item_registry = ts::take_shared<ItemRegistry>(ts);
-        asset_id = item_balance::register_item_type(
-            &mut item_registry,
-            &admin_cap,
-            FUEL_TYPE_ID,
-            item_tenant,
-            b"Fuel".to_string(),
-            test_helpers::fuel_item_volume(),
-            0,
-            b"".to_string(),
-        );
+        asset_id =
+            item_balance::register_item_type(
+                &mut item_registry,
+                &admin_cap,
+                FUEL_TYPE_ID,
+                item_tenant,
+                b"Fuel".to_string(),
+                test_helpers::fuel_item_volume(),
+                0,
+                b"".to_string(),
+            );
         ts::return_shared(item_registry);
         ts::return_to_sender(ts, admin_cap);
     };

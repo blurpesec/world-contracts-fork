@@ -388,7 +388,14 @@ public fun deposit_items() {
         let character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
         let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
-        let balance = inventory.withdraw(&item_registry, ammo_asset_id, 10, assembly_id, assembly_key, &character_a);
+        let balance = inventory.withdraw(
+            &item_registry,
+            ammo_asset_id,
+            10,
+            assembly_id,
+            assembly_key,
+            &character_a,
+        );
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_a_id);
         assert_eq!(inv_ref.used_capacity(), 0);
@@ -720,7 +727,14 @@ fun deposit_item_fail_insufficient_capacity() {
         let character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
         let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
-        let balance = inventory.withdraw(&item_registry, ammo_asset_id, 10, assembly_id, assembly_key, &character_a);
+        let balance = inventory.withdraw(
+            &item_registry,
+            ammo_asset_id,
+            10,
+            assembly_id,
+            assembly_key,
+            &character_a,
+        );
         ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character_a);
@@ -769,7 +783,14 @@ fun withdraw_item_fail_item_not_found() {
         let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let fake_asset_id = object::id_from_address(@0xDEAD);
         // This should abort with EItemDoesNotExist
-        let balance = inventory.withdraw(&item_registry, fake_asset_id, 10, assembly_id, assembly_key, &character);
+        let balance = inventory.withdraw(
+            &item_registry,
+            fake_asset_id,
+            10,
+            assembly_id,
+            assembly_key,
+            &character,
+        );
         // Unreachable code below - needed to satisfy Move's type checker
         inventory.deposit(&item_registry, balance, assembly_id, assembly_key, &character);
         ts::return_shared(item_registry);

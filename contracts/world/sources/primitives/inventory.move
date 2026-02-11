@@ -362,7 +362,9 @@ fun lookup_type_id(item_registry: &ItemRegistry, asset_id: ID): u64 {
 
 /// Asserts that the item's tenant matches the assembly's tenant.
 fun assert_tenant_match(item_registry: &ItemRegistry, asset_id: ID, assembly_key: TenantItemId) {
-    let item_tenant = in_game_id::type_tenant(&item_balance::item_data(item_registry, asset_id).data_key());
+    let item_tenant = in_game_id::type_tenant(
+        &item_balance::item_data(item_registry, asset_id).data_key(),
+    );
     let assembly_tenant = in_game_id::tenant(&assembly_key);
     assert!(item_tenant == assembly_tenant, ETenantMismatch);
 }

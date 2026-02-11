@@ -552,11 +552,7 @@ public fun unanchor(
     id.delete();
 }
 
-public fun unanchor_orphan(
-    storage_unit: StorageUnit,
-    item_registry: &ItemRegistry,
-    _: &AdminCap,
-) {
+public fun unanchor_orphan(storage_unit: StorageUnit, item_registry: &ItemRegistry, _: &AdminCap) {
     let StorageUnit {
         mut id,
         key,

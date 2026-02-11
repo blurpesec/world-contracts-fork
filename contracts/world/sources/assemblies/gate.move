@@ -176,7 +176,10 @@ public fun link_gates(
     );
 
     // Verify gates share the same tenant
-    assert!(in_game_id::tenant(&source_gate.key) == in_game_id::tenant(&destination_gate.key), ETenantMismatch);
+    assert!(
+        in_game_id::tenant(&source_gate.key) == in_game_id::tenant(&destination_gate.key),
+        ETenantMismatch,
+    );
 
     // Verify gates are not already linked
     assert!(

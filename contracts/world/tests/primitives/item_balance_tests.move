@@ -19,12 +19,7 @@ const MASS: u64 = 10;
 // === Helpers ===
 
 /// Register a single item type and return its asset_id.
-fun register(
-    ts: &mut ts::Scenario,
-    type_id: u64,
-    name: vector<u8>,
-    volume: u64,
-): ID {
+fun register(ts: &mut ts::Scenario, type_id: u64, name: vector<u8>, volume: u64): ID {
     ts::next_tx(ts, admin());
     let mut item_registry = ts::take_shared<ItemRegistry>(ts);
     let admin_cap = ts::take_from_sender<AdminCap>(ts);
@@ -149,7 +144,7 @@ fun register_empty_tenant_fails() {
         &mut item_registry,
         &admin_cap,
         TYPE_ID_AMMO,
-        utf8(b""),  // empty tenant
+        utf8(b""), // empty tenant
         utf8(b"Ammo"),
         VOLUME,
         MASS,

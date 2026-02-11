@@ -318,16 +318,17 @@ fun register_lens_item(ts: &mut ts::Scenario): ID {
     {
         let admin_cap = ts::take_from_sender<AdminCap>(ts);
         let mut item_registry = ts::take_shared<ItemRegistry>(ts);
-        asset_id = item_balance::register_item_type(
-            &mut item_registry,
-            &admin_cap,
-            LENS_TYPE_ID,
-            tenant(),
-            b"Lens".to_string(),
-            LENS_VOLUME,
-            0,
-            b"".to_string(),
-        );
+        asset_id =
+            item_balance::register_item_type(
+                &mut item_registry,
+                &admin_cap,
+                LENS_TYPE_ID,
+                tenant(),
+                b"Lens".to_string(),
+                LENS_VOLUME,
+                0,
+                b"".to_string(),
+            );
         ts::return_shared(item_registry);
         ts::return_to_sender(ts, admin_cap);
     };
@@ -340,16 +341,17 @@ fun register_fuel_item_with_tenant(ts: &mut ts::Scenario, item_tenant: String): 
     {
         let admin_cap = ts::take_from_sender<AdminCap>(ts);
         let mut item_registry = ts::take_shared<ItemRegistry>(ts);
-        asset_id = item_balance::register_item_type(
-            &mut item_registry,
-            &admin_cap,
-            test_helpers::fuel_type_1(),
-            item_tenant,
-            b"Fuel".to_string(),
-            test_helpers::fuel_item_volume(),
-            0,
-            b"".to_string(),
-        );
+        asset_id =
+            item_balance::register_item_type(
+                &mut item_registry,
+                &admin_cap,
+                test_helpers::fuel_type_1(),
+                item_tenant,
+                b"Fuel".to_string(),
+                test_helpers::fuel_item_volume(),
+                0,
+                b"".to_string(),
+            );
         ts::return_shared(item_registry);
         ts::return_to_sender(ts, admin_cap);
     };
@@ -362,16 +364,17 @@ fun register_ammo_item_with_tenant(ts: &mut ts::Scenario, item_tenant: String): 
     {
         let admin_cap = ts::take_from_sender<AdminCap>(ts);
         let mut item_registry = ts::take_shared<ItemRegistry>(ts);
-        asset_id = item_balance::register_item_type(
-            &mut item_registry,
-            &admin_cap,
-            AMMO_TYPE_ID,
-            item_tenant,
-            b"Ammo".to_string(),
-            AMMO_VOLUME,
-            0,
-            b"".to_string(),
-        );
+        asset_id =
+            item_balance::register_item_type(
+                &mut item_registry,
+                &admin_cap,
+                AMMO_TYPE_ID,
+                item_tenant,
+                b"Ammo".to_string(),
+                AMMO_VOLUME,
+                0,
+                b"".to_string(),
+            );
         ts::return_shared(item_registry);
         ts::return_to_sender(ts, admin_cap);
     };
@@ -903,7 +906,10 @@ fun test_swap_ammo_for_lens() {
         assert_eq!(inv_ref_b.used_capacity(), used_capacity_b);
         assert_eq!(inv_ref_b.remaining_capacity(), MAX_CAPACITY - used_capacity_b);
 
-        assert_eq!(storage_unit.item_quantity(character_owner_cap_id, ammo_asset_id), AMMO_QUANTITY);
+        assert_eq!(
+            storage_unit.item_quantity(character_owner_cap_id, ammo_asset_id),
+            AMMO_QUANTITY,
+        );
         assert!(!storage_unit.contains_item(character_owner_cap_id, lens_asset_id));
         assert_eq!(storage_unit.item_quantity(storage_owner_cap_id, lens_asset_id), LENS_QUANTITY);
         assert!(!storage_unit.contains_item(storage_owner_cap_id, ammo_asset_id));
@@ -954,7 +960,10 @@ fun test_swap_ammo_for_lens() {
     ts::next_tx(&mut ts, admin());
     {
         let storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
-        assert_eq!(storage_unit.item_quantity(character_owner_cap_id, lens_asset_id), LENS_QUANTITY);
+        assert_eq!(
+            storage_unit.item_quantity(character_owner_cap_id, lens_asset_id),
+            LENS_QUANTITY,
+        );
         assert!(!storage_unit.contains_item(character_owner_cap_id, ammo_asset_id));
 
         assert_eq!(storage_unit.item_quantity(storage_owner_cap_id, ammo_asset_id), AMMO_QUANTITY);
@@ -1747,10 +1756,23 @@ fun test_deposit_by_owner_fail_tenant_mismatch() {
         STORAGE_A_ITEM_ID + 1,
         STORAGE_A_TYPE_ID,
     );
-    online_storage_unit(&mut ts, user_a(), character_id_diff_tenant, storage_b_id, nwn_id, diff_fuel_asset_id);
+    online_storage_unit(
+        &mut ts,
+        user_a(),
+        character_id_diff_tenant,
+        storage_b_id,
+        nwn_id,
+        diff_fuel_asset_id,
+    );
 
     // Mint ammo in storage unit B tenant test
-    mint_ammo<StorageUnit>(&mut ts, storage_b_id, character_id_diff_tenant, user_a(), diff_ammo_asset_id);
+    mint_ammo<StorageUnit>(
+        &mut ts,
+        storage_b_id,
+        character_id_diff_tenant,
+        user_a(),
+        diff_ammo_asset_id,
+    );
 
     // Withdraw item from storage unit B and deposit in different tenant
     ts::next_tx(&mut ts, user_a());
@@ -1871,10 +1893,23 @@ fun test_deposit_via_extension_fail_tenant_mismatch() {
         STORAGE_A_ITEM_ID + 1,
         STORAGE_A_TYPE_ID,
     );
-    online_storage_unit(&mut ts, user_a(), character_id_diff_tenant, storage_b_id, nwn_id, diff_fuel_asset_id);
+    online_storage_unit(
+        &mut ts,
+        user_a(),
+        character_id_diff_tenant,
+        storage_b_id,
+        nwn_id,
+        diff_fuel_asset_id,
+    );
 
     // Mint ammo in storage unit B
-    mint_ammo<StorageUnit>(&mut ts, storage_b_id, character_id_diff_tenant, user_a(), diff_ammo_asset_id);
+    mint_ammo<StorageUnit>(
+        &mut ts,
+        storage_b_id,
+        character_id_diff_tenant,
+        user_a(),
+        diff_ammo_asset_id,
+    );
 
     // Withdraw item from storage unit B
     ts::next_tx(&mut ts, user_a());
@@ -2002,7 +2037,10 @@ fun test_update_energy_source_fail_tenant_mismatch() {
     let character_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
     let different_tenant = DIFFERENT_TENANT.to_string();
     let character_id_diff = create_character_with_tenant(
-        &mut ts, user_a(), CHARACTER_A_ITEM_ID, different_tenant,
+        &mut ts,
+        user_a(),
+        CHARACTER_A_ITEM_ID,
+        different_tenant,
     );
 
     // NWN under TEST tenant (created implicitly via create_network_node)
@@ -2042,7 +2080,10 @@ fun test_update_energy_source_connected_fail_tenant_mismatch() {
     let character_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
     let different_tenant = DIFFERENT_TENANT.to_string();
     let character_id_diff = create_character_with_tenant(
-        &mut ts, user_a(), CHARACTER_A_ITEM_ID, different_tenant,
+        &mut ts,
+        user_a(),
+        CHARACTER_A_ITEM_ID,
+        different_tenant,
     );
 
     let nwn_test_id = create_network_node(&mut ts, character_id);
