@@ -1624,10 +1624,7 @@ fun online_fail_by_unauthorized_owner() {
 
     ts::next_tx(&mut ts, user_a());
     {
-        nwn.online(
-            &owner_cap,
-            &clock,
-        );
+        nwn.online(&owner_cap, &clock);
     };
     character.return_owner_cap(owner_cap);
     ts::return_shared(character);
@@ -2120,10 +2117,7 @@ fun test_fail_network_node_offline() {
 
     ts::next_tx(&mut ts, user_a());
     {
-        nwn.online(
-            &owner_cap,
-            &clock,
-        );
+        nwn.online(&owner_cap, &clock);
     };
     ts::return_shared(nwn);
     character.return_owner_cap(owner_cap);
