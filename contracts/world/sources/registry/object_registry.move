@@ -1,12 +1,17 @@
-/// Unified registry to derive all in-game object ids for game assets
+/// Unified registry to derive all in-game object ids for game assets.
 ///
-/// All game assets (characters, assemblies, network nodes, etc) derive their deterministic object IDs
-/// from this single registry using TenantItemId (item_id + tenant) as the derivation key. This
-/// guarantees that each in-game item ID can only be used once across all object types.
+/// All game assets (characters, assemblies, network nodes, item types, etc) derive their
+/// deterministic object IDs from this single registry using a derivation key. The key type
+/// determines the namespace:
+///
+/// - `TenantItemId`  — unique game entities (characters, assemblies, …)
+/// - `TenantTypeId`  — fungible item type registrations
+///
+/// Because `derived_object` includes the Move type tag in the hash, different key types
+/// will never produce colliding addresses even when the numeric values match.
 module world::object_registry;
 
 use sui::derived_object;
-use world::in_game_id::TenantItemId;
 
 // === Structs ===
 public struct ObjectRegistry has key {
@@ -14,7 +19,10 @@ public struct ObjectRegistry has key {
 }
 
 // === View Functions ===
-public fun object_exists(registry: &ObjectRegistry, key: TenantItemId): bool {
+
+/// Check whether a derived object for `key` has already been claimed under this registry.
+/// Generic over key type so both `TenantItemId` and `TenantTypeId` (and any future key) work.
+public fun object_exists<K: copy + drop + store>(registry: &ObjectRegistry, key: K): bool {
     derived_object::exists(&registry.id, key)
 }
 

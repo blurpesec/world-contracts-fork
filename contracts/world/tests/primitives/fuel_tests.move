@@ -8,6 +8,7 @@ use world::{
     access::AdminCap,
     fuel::{Self, FuelConfig, Fuel},
     in_game_id::{create_key, TenantItemId},
+    item_balance::{Self, ItemBalance, ItemRegistry},
     object_registry::ObjectRegistry,
     test_helpers::{
         Self,
@@ -26,7 +27,6 @@ use world::{
 const FUEL_MAX_CAPACITY: u64 = 1000;
 const FUEL_BURN_RATE_IN_SECONDS: u64 = 3600;
 const FUEL_TYPE_ID: u64 = 1;
-const FUEL_VOLUME: u64 = 10;
 const DEPOSIT_AMOUNT: u64 = 50;
 const WITHDRAW_AMOUNT: u64 = 20;
 
@@ -45,20 +45,21 @@ public struct NetworkNode has key {
 // === Test Helper Functions ===
 fun fuel_deposit(
     nwn: &mut NetworkNode,
-    type_id: u64,
-    volume: u64,
+    item_registry: &ItemRegistry,
+    asset_id: ID,
     quantity: u64,
     clock: &clock::Clock,
 ) {
+    let balance = item_balance::test_increase_supply(item_registry, asset_id, quantity);
     let nwn_id = object::id(nwn);
     let nwn_key = nwn.key;
-    nwn.fuel.deposit(nwn_id, nwn_key, type_id, volume, quantity, clock);
+    nwn.fuel.deposit(item_registry, balance, nwn_id, nwn_key, clock);
 }
 
-fun fuel_withdraw(nwn: &mut NetworkNode, quantity: u64) {
+fun fuel_withdraw(nwn: &mut NetworkNode, quantity: u64): ItemBalance {
     let nwn_id = object::id(nwn);
     let nwn_key = nwn.key;
-    nwn.fuel.withdraw(nwn_id, nwn_key, quantity);
+    nwn.fuel.withdraw(quantity, nwn_id, nwn_key)
 }
 
 fun fuel_start_burning(nwn: &mut NetworkNode, clock: &clock::Clock) {
@@ -211,18 +212,19 @@ fun update_existing_fuel_efficiency() {
 fun deposit_fuel() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
 
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, DEPOSIT_AMOUNT, &clock);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, DEPOSIT_AMOUNT, &clock);
         assert_eq!(nwn.fuel.quantity(), DEPOSIT_AMOUNT);
-        assert!(option::is_some(&nwn.fuel.type_id()));
-        assert_eq!(*option::borrow(&nwn.fuel.type_id()), FUEL_TYPE_ID);
-        assert!(option::is_some(&nwn.fuel.volume()));
-        assert_eq!(*option::borrow(&nwn.fuel.volume()), FUEL_VOLUME);
+        assert_eq!(*nwn.fuel.type_id().borrow(), FUEL_TYPE_ID);
+        assert!(nwn.fuel.fuel_asset_id().is_some());
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -234,21 +236,26 @@ fun deposit_fuel() {
 fun deposit_fuel_multiple_times() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
 
     let clock = clock::create_for_testing(ts.ctx());
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, DEPOSIT_AMOUNT, &clock);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, DEPOSIT_AMOUNT, &clock);
         assert_eq!(nwn.fuel.quantity(), DEPOSIT_AMOUNT);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, DEPOSIT_AMOUNT, &clock);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, DEPOSIT_AMOUNT, &clock);
         assert_eq!(nwn.fuel.quantity(), DEPOSIT_AMOUNT + DEPOSIT_AMOUNT);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -260,20 +267,26 @@ fun deposit_fuel_multiple_times() {
 fun withdraw_fuel() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
 
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, DEPOSIT_AMOUNT, &clock);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, DEPOSIT_AMOUNT, &clock);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_withdraw(&mut nwn, WITHDRAW_AMOUNT);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        let balance = fuel_withdraw(&mut nwn, WITHDRAW_AMOUNT);
         assert_eq!(nwn.fuel.quantity(), DEPOSIT_AMOUNT - WITHDRAW_AMOUNT);
+        item_balance::test_decrease_supply(&item_registry, balance);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -285,28 +298,36 @@ fun withdraw_fuel() {
 fun deposit_and_withdraw_fuel() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
 
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, DEPOSIT_AMOUNT, &clock);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, DEPOSIT_AMOUNT, &clock);
         assert_eq!(nwn.fuel.quantity(), DEPOSIT_AMOUNT);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_withdraw(&mut nwn, WITHDRAW_AMOUNT);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        let balance = fuel_withdraw(&mut nwn, WITHDRAW_AMOUNT);
         assert_eq!(nwn.fuel.quantity(), DEPOSIT_AMOUNT - WITHDRAW_AMOUNT);
+        item_balance::test_decrease_supply(&item_registry, balance);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, DEPOSIT_AMOUNT, &clock);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, DEPOSIT_AMOUNT, &clock);
         assert_eq!(nwn.fuel.quantity(), DEPOSIT_AMOUNT - WITHDRAW_AMOUNT + DEPOSIT_AMOUNT);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -319,15 +340,18 @@ fun start_burning() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
 
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 5, &clock);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 5, &clock);
         assert_eq!(nwn.fuel.quantity(), 5);
         assert_eq!(nwn.fuel.is_burning(), false);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -349,6 +373,7 @@ fun stop_burning() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let mut clock = clock::create_for_testing(ts.ctx());
     let time_start = 1000;
@@ -357,10 +382,12 @@ fun stop_burning() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 5, &clock);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 5, &clock);
         clock.set_for_testing(time_start);
         fuel_start_burning(&mut nwn, &clock);
         assert_eq!(nwn.fuel.is_burning(), true);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -385,6 +412,7 @@ fun update_fuel() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let mut clock = clock::create_for_testing(ts.ctx());
     let time_start = 1000;
@@ -393,10 +421,12 @@ fun update_fuel() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 5, &clock);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 5, &clock);
         clock.set_for_testing(time_start);
         fuel_start_burning(&mut nwn, &clock);
         assert_eq!(nwn.fuel.quantity(), 4);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -421,18 +451,21 @@ fun update_fuel_no_change_when_not_burning() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
 
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let fuel_config = ts::take_shared<FuelConfig>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 5, &clock);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 5, &clock);
         // Not burning, so update should do nothing
         fuel_update(&mut nwn, &fuel_config, &clock);
         assert_eq!(nwn.fuel.quantity(), 5);
         assert_eq!(nwn.fuel.is_burning(), false);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
         ts::return_shared(fuel_config);
     };
@@ -446,6 +479,7 @@ fun has_enough_fuel() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let mut clock = clock::create_for_testing(ts.ctx());
     let time_start = 1000;
@@ -458,9 +492,11 @@ fun has_enough_fuel() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let fuel_config = ts::take_shared<FuelConfig>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 5, &clock);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 5, &clock);
         assert_eq!(nwn.fuel.has_enough_fuel(&fuel_config, &clock), false);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
         ts::return_shared(fuel_config);
     };
@@ -545,6 +581,7 @@ fun fuel_consumption_with_multiple_updates_then_stop() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let mut clock = clock::create_for_testing(ts.ctx());
 
@@ -558,14 +595,16 @@ fun fuel_consumption_with_multiple_updates_then_stop() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let fuel_config = ts::take_shared<FuelConfig>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 5, &clock);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 5, &clock);
         clock.set_for_testing(time_10_00);
         fuel_start_burning(&mut nwn, &clock);
         assert_eq!(nwn.fuel.quantity(), 4);
         assert_eq!(nwn.fuel.is_burning(), true);
         assert_eq!(nwn.fuel.burn_start_time(), time_10_00);
         assert_eq!(nwn.fuel.has_enough_fuel(&fuel_config, &clock), true);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
         ts::return_shared(fuel_config);
     };
@@ -658,7 +697,7 @@ fun fuel_consumption_with_multiple_updates_then_stop() {
 }
 
 #[test]
-#[expected_failure(abort_code = fuel::ETypeIdEmtpy)]
+#[expected_failure(abort_code = fuel::ETypeIdEmpty)]
 fun set_fuel_efficiency_with_empty_type_id() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
@@ -696,7 +735,7 @@ fun set_fuel_efficiency_exceeding_max() {
 }
 
 #[test]
-#[expected_failure(abort_code = fuel::ETypeIdEmtpy)]
+#[expected_failure(abort_code = fuel::ETypeIdEmpty)]
 fun unset_fuel_efficiency_with_empty_type_id() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
@@ -741,7 +780,8 @@ fun withdraw_insufficient_fuel() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_withdraw(&mut nwn, WITHDRAW_AMOUNT); // Should abort
+        let balance = fuel_withdraw(&mut nwn, WITHDRAW_AMOUNT); // Should abort
+        let (_, _) = balance.into_parts();
         ts::return_shared(nwn);
     };
 
@@ -753,6 +793,7 @@ fun withdraw_insufficient_fuel() {
 fun deposit_exceeds_capacity() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     let small_capacity: u64 = 100;
     create_network_node(&mut ts, small_capacity, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
@@ -760,8 +801,10 @@ fun deposit_exceeds_capacity() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         // volume * quantity = 10 * 11 = 110 > 100 (capacity)
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 11, &clock); // Should abort
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 11, &clock); // Should abort
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -774,19 +817,25 @@ fun deposit_exceeds_capacity() {
 fun deposit_different_fuel_type() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
+    let asset_id_2 = test_helpers::register_fuel_item_2(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
 
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, DEPOSIT_AMOUNT, &clock);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, DEPOSIT_AMOUNT, &clock);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, 2, FUEL_VOLUME, DEPOSIT_AMOUNT, &clock); // Should abort
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id_2, DEPOSIT_AMOUNT, &clock); // Should abort
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -800,15 +849,18 @@ fun start_burning_when_already_burning() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
 
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 5, &clock);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 5, &clock);
         fuel_start_burning(&mut nwn, &clock);
         fuel_start_burning(&mut nwn, &clock); // Should abort
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -822,14 +874,27 @@ fun start_burning_with_no_fuel() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
 
+    // Deposit fuel, then withdraw it all so asset_id is Some but quantity is 0
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        // No fuel deposited, quantity is 0
-        fuel_start_burning(&mut nwn, &clock); // Should abort
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 10, &clock);
+        let withdrawn = fuel_withdraw(&mut nwn, 10);
+        item_balance::test_decrease_supply(&item_registry, withdrawn);
+        ts::return_shared(item_registry);
+        ts::return_shared(nwn);
+    };
+
+    // Now try to start burning — asset_id is Some, but quantity is 0
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        fuel_start_burning(&mut nwn, &clock); // Should abort with ENoFuelToBurn
         ts::return_shared(nwn);
     };
 
@@ -843,15 +908,18 @@ fun stop_burning_when_not_burning() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
 
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let fuel_config = ts::take_shared<FuelConfig>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 5, &clock);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 5, &clock);
         fuel_stop_burning(&mut nwn, &fuel_config, &clock); // Should abort
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
         ts::return_shared(fuel_config);
     };
@@ -865,15 +933,19 @@ fun stop_burning_when_not_burning() {
 fun deposit_with_zero_quantity() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
 
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let nwn_id = object::id(&nwn);
         let nwn_key = nwn.key;
-        nwn.fuel.deposit(nwn_id, nwn_key, FUEL_TYPE_ID, FUEL_VOLUME, 0, &clock); // Should abort
+        let balance = item_balance::zero(asset_id);
+        nwn.fuel.deposit(&item_registry, balance, nwn_id, nwn_key, &clock); // Should abort
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -886,33 +958,18 @@ fun deposit_with_zero_quantity() {
 fun withdraw_with_zero_quantity() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let clock = clock::create_for_testing(ts.ctx());
 
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, DEPOSIT_AMOUNT, &clock);
-        fuel_withdraw(&mut nwn, 0); // Should abort
-        ts::return_shared(nwn);
-    };
-
-    clock.destroy_for_testing();
-    ts::end(ts);
-}
-
-#[test]
-#[expected_failure(abort_code = fuel::EInvalidVolume)]
-fun deposit_with_zero_volume() {
-    let mut ts = ts::begin(user_a());
-    test_helpers::setup_world(&mut ts);
-    create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
-    let clock = clock::create_for_testing(ts.ctx());
-
-    ts::next_tx(&mut ts, user_a());
-    {
-        let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, 0, DEPOSIT_AMOUNT, &clock); // Should abort
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, DEPOSIT_AMOUNT, &clock);
+        let balance = fuel_withdraw(&mut nwn, 0); // Should abort
+        let (_, _) = balance.into_parts();
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
     };
 
@@ -940,7 +997,7 @@ fun set_fuel_efficiency_below_minimum() {
 }
 
 #[test]
-#[expected_failure(abort_code = fuel::ENoFuelToBurn)]
+#[expected_failure(abort_code = fuel::ETypeIdEmpty)]
 fun start_burning_with_empty_type_id() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
@@ -951,10 +1008,10 @@ fun start_burning_with_empty_type_id() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
-        // No fuel deposited, type_id = 0, quantity = 0
+        // No fuel deposited, asset_id is None
         let nwn_id = object::id(&nwn);
         let nwn_key = nwn.key;
-        nwn.fuel.start_burning(nwn_id, nwn_key, &clock); // Should abort with ENoFuelToBurn
+        nwn.fuel.start_burning(nwn_id, nwn_key, &clock); // Should abort with ETypeIdEmpty
         ts::return_shared(nwn);
     };
 
@@ -968,6 +1025,7 @@ fun last_unit_burning_scenario() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let mut clock = clock::create_for_testing(ts.ctx());
 
@@ -981,14 +1039,16 @@ fun last_unit_burning_scenario() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let fuel_config = ts::take_shared<FuelConfig>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 2, &clock);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 2, &clock);
         clock.set_for_testing(time_10_00);
         fuel_start_burning(&mut nwn, &clock);
         assert_eq!(nwn.fuel.quantity(), 1);
         assert_eq!(nwn.fuel.is_burning(), true);
         assert_eq!(nwn.fuel.burn_start_time(), time_10_00);
         assert_eq!(nwn.fuel.has_enough_fuel(&fuel_config, &clock), true);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
         ts::return_shared(fuel_config);
     };
@@ -1081,6 +1141,7 @@ fun update_before_stop() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let mut clock = clock::create_for_testing(ts.ctx());
 
@@ -1092,14 +1153,16 @@ fun update_before_stop() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let fuel_config = ts::take_shared<FuelConfig>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 5, &clock);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 5, &clock);
         clock.set_for_testing(time_10_00);
         fuel_start_burning(&mut nwn, &clock);
         assert_eq!(nwn.fuel.quantity(), 4);
         assert_eq!(nwn.fuel.is_burning(), true);
         assert_eq!(nwn.fuel.burn_start_time(), time_10_00);
         assert_eq!(nwn.fuel.has_enough_fuel(&fuel_config, &clock), true);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
         ts::return_shared(fuel_config);
     };
@@ -1154,6 +1217,7 @@ fun running_out_of_fuel() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let mut clock = clock::create_for_testing(ts.ctx());
 
@@ -1164,13 +1228,15 @@ fun running_out_of_fuel() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let fuel_config = ts::take_shared<FuelConfig>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 1, &clock);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 1, &clock);
         clock.set_for_testing(time_10_00);
         fuel_start_burning(&mut nwn, &clock);
         assert_eq!(nwn.fuel.quantity(), 0);
         assert_eq!(nwn.fuel.is_burning(), true);
         assert_eq!(nwn.fuel.has_enough_fuel(&fuel_config, &clock), true); // Last unit still burning
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
         ts::return_shared(fuel_config);
     };
@@ -1207,6 +1273,7 @@ fun cron_job_failure_missed_updates() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let mut clock = clock::create_for_testing(ts.ctx());
 
@@ -1217,14 +1284,16 @@ fun cron_job_failure_missed_updates() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let fuel_config = ts::take_shared<FuelConfig>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 5, &clock);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 5, &clock);
         clock.set_for_testing(time_10_00);
         fuel_start_burning(&mut nwn, &clock);
         assert_eq!(nwn.fuel.quantity(), 4);
         assert_eq!(nwn.fuel.is_burning(), true);
         assert_eq!(nwn.fuel.burn_start_time(), time_10_00);
         assert_eq!(nwn.fuel.has_enough_fuel(&fuel_config, &clock), true);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
         ts::return_shared(fuel_config);
     };
@@ -1260,6 +1329,7 @@ fun fuel_efficiency_impact() {
     let mut ts = ts::begin(user_a());
     test_helpers::setup_world(&mut ts);
     test_helpers::configure_fuel(&mut ts);
+    let asset_id = test_helpers::register_fuel_item(&mut ts);
     create_network_node(&mut ts, FUEL_MAX_CAPACITY, FUEL_BURN_RATE_IN_SECONDS);
     let mut clock = clock::create_for_testing(ts.ctx());
 
@@ -1280,13 +1350,15 @@ fun fuel_efficiency_impact() {
     ts::next_tx(&mut ts, user_a());
     {
         let mut nwn = ts::take_shared<NetworkNode>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let fuel_config = ts::take_shared<FuelConfig>(&ts);
-        fuel_deposit(&mut nwn, FUEL_TYPE_ID, FUEL_VOLUME, 5, &clock);
+        fuel_deposit(&mut nwn, &item_registry, asset_id, 5, &clock);
         clock.set_for_testing(time_10_00);
         fuel_start_burning(&mut nwn, &clock);
         assert_eq!(nwn.fuel.quantity(), 4);
         assert_eq!(nwn.fuel.is_burning(), true);
         assert_eq!(nwn.fuel.has_enough_fuel(&fuel_config, &clock), true);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
         ts::return_shared(fuel_config);
     };

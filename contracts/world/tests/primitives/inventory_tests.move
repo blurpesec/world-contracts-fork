@@ -8,6 +8,7 @@ use world::{
     character::{Self, Character},
     in_game_id,
     inventory::{Self, Inventory},
+    item_balance::{Self, ItemRegistry},
     location::{Self, Location},
     object_registry::ObjectRegistry,
     status::{Self, AssemblyStatus},
@@ -18,10 +19,6 @@ const STORAGE_ITEM_ID: u64 = 5500004145107;
 const LOCATION_A_HASH: vector<u8> =
     x"7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b";
 const MAX_CAPACITY: u64 = 1000;
-const AMMO_TYPE_ID: u64 = 88069;
-const AMMO_ITEM_ID: u64 = 1000004145107;
-const AMMO_VOLUME: u64 = 100;
-const AMMO_QUANTITY: u32 = 10;
 const STATUS_ONLINE: u8 = 1;
 const STATUS_OFFLINE: u8 = 2;
 
@@ -122,27 +119,17 @@ fun online(ts: &mut ts::Scenario) {
     }
 }
 
-fun mint_ammo(ts: &mut ts::Scenario, character_id: ID) {
+fun mint_ammo(ts: &mut ts::Scenario, character_id: ID, ammo_asset_id: ID) {
     ts::next_tx(ts, admin());
     {
         let mut storage_unit = ts::take_shared<StorageUnit>(ts);
         let assembly_id = object::id(&storage_unit);
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(ts);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-
-        inventory.mint_items(
-            assembly_id,
-            assembly_key,
-            &character,
-            tenant(),
-            AMMO_ITEM_ID,
-            AMMO_TYPE_ID,
-            AMMO_VOLUME,
-            AMMO_QUANTITY,
-            LOCATION_A_HASH,
-            ts.ctx(),
-        );
+        inventory.mint(&item_registry, ammo_asset_id, 10, assembly_id, assembly_key, &character);
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -179,20 +166,21 @@ fun mint_items() {
     let mut ts = ts::begin(governor());
     test_helpers::setup_world(&mut ts);
     let character_id = create_character_for_user_a(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
     create_storage_unit(&mut ts, character_id);
 
     online(&mut ts);
-    mint_ammo(&mut ts, character_id);
+    mint_ammo(&mut ts, character_id, ammo_asset_id);
 
     ts::next_tx(&mut ts, admin());
     {
         let storage_unit = ts::take_shared<StorageUnit>(&ts);
         let inventory = df::borrow<ID, Inventory>(&storage_unit.id, character_id);
-        let used_capacity = (AMMO_QUANTITY as u64) * AMMO_VOLUME;
+        let used_capacity = 10 * test_helpers::ammo_volume();
 
         assert_eq!(inventory.used_capacity(), used_capacity);
         assert_eq!(inventory.remaining_capacity(), 0);
-        assert_eq!(inventory.item_quantity(AMMO_TYPE_ID), 10);
+        assert_eq!(inventory.item_quantity(ammo_asset_id), 10);
         assert_eq!(inventory.inventory_item_length(), 1);
         assert_eq!(storage_unit.location.hash(), LOCATION_A_HASH);
         ts::return_shared(storage_unit);
@@ -208,6 +196,7 @@ fun mint_items_increases_quantity_when_exists() {
     let mut ts = ts::begin(governor());
     test_helpers::setup_world(&mut ts);
     let character_id = create_character_for_user_a(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
     create_storage_unit(&mut ts, character_id);
 
     online(&mut ts);
@@ -217,27 +206,18 @@ fun mint_items_increases_quantity_when_exists() {
         let assembly_id = object::id(&storage_unit);
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        inventory.mint_items(
-            assembly_id,
-            assembly_key,
-            &character,
-            tenant(),
-            AMMO_ITEM_ID,
-            AMMO_TYPE_ID,
-            AMMO_VOLUME,
-            5u32,
-            LOCATION_A_HASH,
-            ts.ctx(),
-        );
+        inventory.mint(&item_registry, ammo_asset_id, 5, assembly_id, assembly_key, &character);
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_id);
-        let used_capacity = 5 * AMMO_VOLUME;
+        let used_capacity = 5 * test_helpers::ammo_volume();
 
         assert_eq!(inv_ref.used_capacity(), used_capacity);
         assert_eq!(inv_ref.remaining_capacity(), MAX_CAPACITY - used_capacity);
-        assert_eq!(inv_ref.item_quantity(AMMO_TYPE_ID), 5);
+        assert_eq!(inv_ref.item_quantity(ammo_asset_id), 5);
         assert_eq!(inv_ref.inventory_item_length(), 1);
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -247,26 +227,16 @@ fun mint_items_increases_quantity_when_exists() {
         let assembly_id = object::id(&storage_unit);
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        inventory.mint_items(
-            assembly_id,
-            assembly_key,
-            &character,
-            tenant(),
-            AMMO_ITEM_ID,
-            AMMO_TYPE_ID,
-            AMMO_VOLUME,
-            5u32,
-            LOCATION_A_HASH,
-            ts.ctx(),
-        );
+        inventory.mint(&item_registry, ammo_asset_id, 5, assembly_id, assembly_key, &character);
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_id);
         assert_eq!(inv_ref.used_capacity(), MAX_CAPACITY);
         assert_eq!(inv_ref.remaining_capacity(), 0);
-        assert_eq!(inv_ref.item_quantity(AMMO_TYPE_ID), 10);
+        assert_eq!(inv_ref.item_quantity(ammo_asset_id), 10);
         assert_eq!(inv_ref.inventory_item_length(), 1);
-        assert_eq!(inv_ref.item_location(AMMO_TYPE_ID), LOCATION_A_HASH);
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -282,10 +252,11 @@ public fun burn_items() {
     let mut ts = ts::begin(governor());
     test_helpers::setup_world(&mut ts);
     let character_id = create_character_for_user_a(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
     create_storage_unit(&mut ts, character_id);
 
     online(&mut ts);
-    mint_ammo(&mut ts, character_id);
+    mint_ammo(&mut ts, character_id, ammo_asset_id);
 
     ts::next_tx(&mut ts, user_a());
     {
@@ -293,13 +264,15 @@ public fun burn_items() {
         let assembly_id = object::id(&storage_unit);
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
         inventory.burn_items_test(
+            &item_registry,
+            ammo_asset_id,
+            10,
             assembly_id,
             assembly_key,
             &character,
-            AMMO_TYPE_ID,
-            AMMO_QUANTITY,
         );
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_id);
@@ -310,6 +283,7 @@ public fun burn_items() {
         let location_ref = &storage_unit.location;
         assert_eq!(location_ref.hash(), LOCATION_A_HASH);
 
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -324,10 +298,11 @@ public fun burn_partial_items() {
     let mut ts = ts::begin(governor());
     test_helpers::setup_world(&mut ts);
     let character_id = create_character_for_user_a(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
     create_storage_unit(&mut ts, character_id);
 
     online(&mut ts);
-    mint_ammo(&mut ts, character_id);
+    mint_ammo(&mut ts, character_id, ammo_asset_id);
 
     ts::next_tx(&mut ts, user_a());
     {
@@ -335,21 +310,24 @@ public fun burn_partial_items() {
         let assembly_id = object::id(&storage_unit);
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
         inventory.burn_items_test(
+            &item_registry,
+            ammo_asset_id,
+            5,
             assembly_id,
             assembly_key,
             &character,
-            AMMO_TYPE_ID,
-            5u32, //diff quantity
         );
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_id);
-        let used_capacity = 5 * AMMO_VOLUME;
+        let used_capacity = 5 * test_helpers::ammo_volume();
         assert_eq!(inv_ref.used_capacity(), used_capacity);
         assert_eq!(inv_ref.remaining_capacity(), MAX_CAPACITY - used_capacity);
         assert_eq!(inv_ref.inventory_item_length(), 1);
 
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -366,11 +344,12 @@ public fun deposit_items() {
     test_helpers::setup_world(&mut ts);
     let character_a_id = create_character_for_user_a(&mut ts);
     let character_b_id = create_character_for_user_b(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
     // Creating a storage unit creates a inventory by default for the owner
     let storage_unit_id = create_storage_unit(&mut ts, character_a_id);
 
     online(&mut ts);
-    mint_ammo(&mut ts, character_a_id);
+    mint_ammo(&mut ts, character_a_id, ammo_asset_id);
 
     // Create a ephemeral inventory for user b
     ts::next_tx(&mut ts, admin());
@@ -407,8 +386,9 @@ public fun deposit_items() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
         let character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
-        let item = inventory.withdraw_item(assembly_id, assembly_key, &character_a, AMMO_TYPE_ID);
+        let balance = inventory.withdraw(&item_registry, ammo_asset_id, 10, assembly_id, assembly_key, &character_a);
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_a_id);
         assert_eq!(inv_ref.used_capacity(), 0);
@@ -419,16 +399,17 @@ public fun deposit_items() {
             &mut storage_unit.id,
             character_b_id,
         );
-        eph_inventory.deposit_item(assembly_id, assembly_key, &character_b, item);
+        eph_inventory.deposit(&item_registry, balance, assembly_id, assembly_key, &character_b);
         ts::return_shared(character_a);
         ts::return_shared(character_b);
 
         let eph_inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_b_id);
-        let used_capacity = (AMMO_QUANTITY as u64) * AMMO_VOLUME;
+        let used_capacity = 10 * test_helpers::ammo_volume();
         assert_eq!(eph_inv_ref.used_capacity(), used_capacity);
         assert_eq!(eph_inv_ref.remaining_capacity(), MAX_CAPACITY - used_capacity);
         assert_eq!(eph_inv_ref.inventory_item_length(), 1);
 
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
     };
     ts::end(ts);
@@ -439,6 +420,7 @@ fun burn_items_with_proof() {
     let mut ts = ts::begin(governor());
     test_helpers::setup_world(&mut ts);
     let character_id = create_character_for_user_a(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
     test_helpers::register_server_address(&mut ts);
     let verified_location_hash = test_helpers::get_verified_location_hash();
 
@@ -466,19 +448,10 @@ fun burn_items_with_proof() {
         let assembly_id = object::id(&storage_unit);
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        inventory.mint_items(
-            assembly_id,
-            assembly_key,
-            &character,
-            tenant(),
-            AMMO_TYPE_ID,
-            AMMO_TYPE_ID,
-            AMMO_VOLUME,
-            AMMO_QUANTITY,
-            x"16217de8ec7330ec3eac32831df5c9cd9b21a255756a5fd5762dd7f49f6cc049",
-            ts.ctx(),
-        );
+        inventory.mint(&item_registry, ammo_asset_id, 10, assembly_id, assembly_key, &character);
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -493,17 +466,19 @@ fun burn_items_with_proof() {
         let server_registry = ts::take_shared<ServerAddressRegistry>(&ts);
         let proof = test_helpers::construct_location_proof(verified_location_hash);
         let location_proof = bcs::to_bytes(&proof);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
 
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        inventory.burn_items_with_proof_test(
+        inventory.burn_with_proof_test(
+            &item_registry,
+            ammo_asset_id,
+            10,
             assembly_id,
             assembly_key,
             &character,
             &server_registry,
             location_ref,
             location_proof,
-            AMMO_TYPE_ID,
-            AMMO_QUANTITY,
             ts.ctx(),
         );
         ts::return_shared(character);
@@ -516,6 +491,7 @@ fun burn_items_with_proof() {
         let location_ref = &storage_unit.location;
         assert_eq!(location_ref.hash(), test_helpers::get_verified_location_hash());
 
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(server_registry);
     };
@@ -552,12 +528,12 @@ fun create_assembly_fail_on_empty_capacity() {
     ts::end(ts);
 }
 
-/// Tests that minting items with empty type_id fails
-/// Scenario: Attempt to mint items with type_id = 0
-/// Expected: Transaction aborts with ETypeIdEmpty error
+/// Tests that minting items with an unregistered asset_id fails
+/// Scenario: Attempt to mint items with a non-existent asset_id
+/// Expected: Transaction aborts with EAssetNotRegistered error
 #[test]
-#[expected_failure(abort_code = inventory::ETypeIdEmpty)]
-fun mint_items_fail_empty_type_id() {
+#[expected_failure(abort_code = item_balance::EAssetNotRegistered)]
+fun mint_items_fail_unregistered_asset() {
     let mut ts = ts::begin(governor());
     test_helpers::setup_world(&mut ts);
     let character_id = create_character_for_user_a(&mut ts);
@@ -575,18 +551,17 @@ fun mint_items_fail_empty_type_id() {
         );
 
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
-        inventory.mint_items(
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        let fake_asset_id = object::id_from_address(@0xDEAD);
+        inventory.mint(
+            &item_registry,
+            fake_asset_id,
+            10,
             assembly_id,
             assembly_key,
             &character,
-            tenant(),
-            AMMO_TYPE_ID,
-            0,
-            AMMO_VOLUME,
-            AMMO_QUANTITY,
-            LOCATION_A_HASH,
-            ts.ctx(),
         );
+        ts::return_shared(item_registry);
         ts::return_shared(character);
         ts::return_shared(storage_unit);
     };
@@ -602,6 +577,7 @@ fun mint_fail_inventory_insufficient_capacity() {
     let mut ts = ts::begin(governor());
     test_helpers::setup_world(&mut ts);
     let character_id = create_character_for_user_a(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
     create_storage_unit(&mut ts, character_id);
     online(&mut ts);
 
@@ -616,18 +592,17 @@ fun mint_fail_inventory_insufficient_capacity() {
         );
 
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
-        inventory.mint_items(
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        // 15 * 100 = 1500 > MAX_CAPACITY (1000)
+        inventory.mint(
+            &item_registry,
+            ammo_asset_id,
+            15,
             assembly_id,
             assembly_key,
             &character,
-            tenant(),
-            AMMO_ITEM_ID,
-            AMMO_TYPE_ID,
-            AMMO_VOLUME,
-            15u32,
-            LOCATION_A_HASH,
-            ts.ctx(),
         );
+        ts::return_shared(item_registry);
         ts::return_shared(character);
         ts::return_shared(storage_unit);
     };
@@ -643,6 +618,7 @@ public fun burn_items_fail_item_not_found() {
     let mut ts = ts::begin(governor());
     test_helpers::setup_world(&mut ts);
     let character_id = create_character_for_user_a(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
     create_storage_unit(&mut ts, character_id);
     online(&mut ts);
 
@@ -657,13 +633,16 @@ public fun burn_items_fail_item_not_found() {
         );
 
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         inventory.burn_items_test(
+            &item_registry,
+            ammo_asset_id,
+            10,
             assembly_id,
             assembly_key,
             &character,
-            AMMO_TYPE_ID,
-            AMMO_QUANTITY,
         );
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -679,10 +658,11 @@ public fun burn_items_fail_insufficient_quantity() {
     let mut ts = ts::begin(governor());
     test_helpers::setup_world(&mut ts);
     let character_id = create_character_for_user_a(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
     create_storage_unit(&mut ts, character_id);
 
     online(&mut ts);
-    mint_ammo(&mut ts, character_id);
+    mint_ammo(&mut ts, character_id, ammo_asset_id);
 
     ts::next_tx(&mut ts, user_a());
     {
@@ -691,13 +671,16 @@ public fun burn_items_fail_insufficient_quantity() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         inventory.burn_items_test(
+            &item_registry,
+            ammo_asset_id,
+            15,
             assembly_id,
             assembly_key,
             &character,
-            AMMO_TYPE_ID,
-            15u32,
         );
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -714,12 +697,13 @@ fun deposit_item_fail_insufficient_capacity() {
     test_helpers::setup_world(&mut ts);
     let character_a_id = create_character_for_user_a(&mut ts);
     let character_b_id = create_character_for_user_b(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
     create_storage_unit(&mut ts, character_a_id);
 
     online(&mut ts);
-    mint_ammo(&mut ts, character_a_id);
+    mint_ammo(&mut ts, character_a_id, ammo_asset_id);
 
-    // Create a ephemeral inventory for user b with capacity  10
+    // Create a ephemeral inventory for user b with capacity 10
     ts::next_tx(&mut ts, admin());
     {
         let mut storage_unit = ts::take_shared<StorageUnit>(&ts);
@@ -729,16 +713,18 @@ fun deposit_item_fail_insufficient_capacity() {
     };
 
     ts::next_tx(&mut ts, user_a());
-    let item = {
+    let balance = {
         let mut storage_unit = ts::take_shared<StorageUnit>(&ts);
         let assembly_id = object::id(&storage_unit);
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
-        let item = inventory.withdraw_item(assembly_id, assembly_key, &character_a, AMMO_TYPE_ID);
+        let balance = inventory.withdraw(&item_registry, ammo_asset_id, 10, assembly_id, assembly_key, &character_a);
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character_a);
-        item
+        balance
     };
 
     ts::next_tx(&mut ts, user_b());
@@ -747,11 +733,14 @@ fun deposit_item_fail_insufficient_capacity() {
         let assembly_id = object::id(&storage_unit);
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let eph_inventory = df::borrow_mut<ID, Inventory>(
             &mut storage_unit.id,
             character_b_id,
         );
-        eph_inventory.deposit_item(assembly_id, assembly_key, &character_b, item);
+        // 10 items * 100 volume = 1000 > capacity of 10
+        eph_inventory.deposit(&item_registry, balance, assembly_id, assembly_key, &character_b);
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character_b);
     };
@@ -759,7 +748,7 @@ fun deposit_item_fail_insufficient_capacity() {
 }
 
 /// Tests that withdrawing items that don't exist fails
-/// Scenario: Attempt to withdraw item with non-existent item_id
+/// Scenario: Attempt to withdraw item with non-existent asset_id
 /// Expected: Transaction aborts with EItemDoesNotExist error
 #[test]
 #[expected_failure(abort_code = inventory::EItemDoesNotExist)]
@@ -777,10 +766,13 @@ fun withdraw_item_fail_item_not_found() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        let fake_asset_id = object::id_from_address(@0xDEAD);
         // This should abort with EItemDoesNotExist
-        let item = inventory.withdraw_item(assembly_id, assembly_key, &character, 1222);
+        let balance = inventory.withdraw(&item_registry, fake_asset_id, 10, assembly_id, assembly_key, &character);
         // Unreachable code below - needed to satisfy Move's type checker
-        inventory.deposit_item(assembly_id, assembly_key, &character, item);
+        inventory.deposit(&item_registry, balance, assembly_id, assembly_key, &character);
+        ts::return_shared(item_registry);
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };

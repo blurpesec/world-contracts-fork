@@ -8,6 +8,7 @@ use world::{
     energy::{Self, EnergyConfig},
     fuel::{Self, FuelConfig},
     in_game_id::{Self, TenantItemId},
+    item_balance::{Self, ItemBalance, ItemRegistry},
     location::{Self, LocationProof},
     object_registry,
     world::{Self, GovernorCap}
@@ -30,6 +31,11 @@ const ASSEMBLY_TYPE_3: u64 = 6666;
 const ASSEMBLY_TYPE_1_ENERGY: u64 = 50;
 const ASSEMBLY_TYPE_2_ENERGY: u64 = 30;
 const ASSEMBLY_TYPE_3_ENERGY: u64 = 20;
+
+// Item type configs
+const AMMO_TYPE_ID: u64 = 88069;
+const AMMO_VOLUME: u64 = 100;
+const FUEL_ITEM_VOLUME: u64 = 10;
 
 public struct TestObject has key {
     id: UID,
@@ -93,6 +99,12 @@ public fun assembly_type_2_energy(): u64 { ASSEMBLY_TYPE_2_ENERGY }
 
 public fun assembly_type_3_energy(): u64 { ASSEMBLY_TYPE_3_ENERGY }
 
+public fun ammo_type_id(): u64 { AMMO_TYPE_ID }
+
+public fun ammo_volume(): u64 { AMMO_VOLUME }
+
+public fun fuel_item_volume(): u64 { FUEL_ITEM_VOLUME }
+
 /// Initialize world and create admin cap for ADMIN
 public fun setup_world(ts: &mut ts::Scenario) {
     ts::next_tx(ts, governor());
@@ -102,6 +114,7 @@ public fun setup_world(ts: &mut ts::Scenario) {
         object_registry::init_for_testing(ts.ctx());
         fuel::init_for_testing(ts.ctx());
         energy::init_for_testing(ts.ctx());
+        item_balance::init_for_testing(ts.ctx());
     };
 
     ts::next_tx(ts, governor());
@@ -113,6 +126,87 @@ public fun setup_world(ts: &mut ts::Scenario) {
         ts::return_to_sender(ts, gov_cap);
         ts::return_shared(admin_acl);
     };
+}
+
+/// Register the standard fuel item type in ItemRegistry. Returns the asset_id.
+public fun register_fuel_item(ts: &mut ts::Scenario): ID {
+    ts::next_tx(ts, admin());
+    let asset_id;
+    {
+        let admin_cap = ts::take_from_sender<AdminCap>(ts);
+        let mut item_registry = ts::take_shared<ItemRegistry>(ts);
+        asset_id = item_balance::register_item_type(
+            &mut item_registry,
+            &admin_cap,
+            FUEL_TYPE_1,
+            tenant(),
+            b"Fuel Type 1".to_string(),
+            FUEL_ITEM_VOLUME,
+            0,
+            b"".to_string(),
+        );
+        ts::return_shared(item_registry);
+        ts::return_to_sender(ts, admin_cap);
+    };
+    asset_id
+}
+
+/// Register fuel item type 2 (for mismatch tests). Returns the asset_id.
+public fun register_fuel_item_2(ts: &mut ts::Scenario): ID {
+    ts::next_tx(ts, admin());
+    let asset_id;
+    {
+        let admin_cap = ts::take_from_sender<AdminCap>(ts);
+        let mut item_registry = ts::take_shared<ItemRegistry>(ts);
+        asset_id = item_balance::register_item_type(
+            &mut item_registry,
+            &admin_cap,
+            FUEL_TYPE_2,
+            tenant(),
+            b"Fuel Type 2".to_string(),
+            FUEL_ITEM_VOLUME,
+            0,
+            b"".to_string(),
+        );
+        ts::return_shared(item_registry);
+        ts::return_to_sender(ts, admin_cap);
+    };
+    asset_id
+}
+
+/// Register the standard ammo item type in ItemRegistry. Returns the asset_id.
+public fun register_ammo_item(ts: &mut ts::Scenario): ID {
+    ts::next_tx(ts, admin());
+    let asset_id;
+    {
+        let admin_cap = ts::take_from_sender<AdminCap>(ts);
+        let mut item_registry = ts::take_shared<ItemRegistry>(ts);
+        asset_id = item_balance::register_item_type(
+            &mut item_registry,
+            &admin_cap,
+            AMMO_TYPE_ID,
+            tenant(),
+            b"Ammo".to_string(),
+            AMMO_VOLUME,
+            0,
+            b"".to_string(),
+        );
+        ts::return_shared(item_registry);
+        ts::return_to_sender(ts, admin_cap);
+    };
+    asset_id
+}
+
+/// Mint an `ItemBalance` via the test supply function. Useful for fuel tests.
+public fun mint_item_balance(ts: &mut ts::Scenario, asset_id: ID, quantity: u64): ItemBalance {
+    ts::next_tx(ts, admin());
+    let balance;
+    {
+        let item_registry = ts::take_shared<ItemRegistry>(ts);
+        balance = item_balance::test_increase_supply(&item_registry, asset_id, quantity);
+        ts::return_shared(item_registry);
+    };
+    balance
 }
 
 /// Create and transfer an owner cap for a specific object

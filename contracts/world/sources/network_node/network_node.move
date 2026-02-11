@@ -8,6 +8,7 @@
 /// Future: There might be multiple power sources connected together to generate more energy that can be used by assemblies in the base
 module world::network_node;
 
+use std::string::String;
 use sui::{clock::Clock, derived_object, event};
 use world::{
     access::{Self, OwnerCap, AdminCap, AdminACL},
@@ -15,6 +16,7 @@ use world::{
     energy::{Self, EnergySource},
     fuel::{Self, FuelConfig, Fuel},
     in_game_id::{Self, TenantItemId},
+    item_balance::{ItemBalance, ItemRegistry},
     location::{Self, Location},
     metadata::{Self, Metadata},
     object_registry::ObjectRegistry,
@@ -85,13 +87,14 @@ public struct NetworkNodeCreatedEvent has copy, drop {
 }
 
 // === Public Functions ===
+
+/// Deposits a fuel `ItemBalance`.
 public fun deposit_fuel(
     nwn: &mut NetworkNode,
+    item_registry: &ItemRegistry,
     admin_acl: &AdminACL,
     owner_cap: &OwnerCap<NetworkNode>,
-    type_id: u64,
-    volume: u64,
-    quantity: u64,
+    balance: ItemBalance,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -99,21 +102,22 @@ public fun deposit_fuel(
     let nwn_key = nwn.key;
     assert!(access::is_authorized(owner_cap, nwn_id), ENetworkNodeNotAuthorized);
     admin_acl.verify_sponsor(ctx);
-    nwn.fuel.deposit(nwn_id, nwn_key, type_id, volume, quantity, clock);
+    nwn.fuel.deposit(item_registry, balance, nwn_id, nwn_key, clock);
 }
 
+/// Withdraws fuel as an `ItemBalance`.
 public fun withdraw_fuel(
     nwn: &mut NetworkNode,
     admin_acl: &AdminACL,
     owner_cap: &OwnerCap<NetworkNode>,
     quantity: u64,
     ctx: &mut TxContext,
-) {
+): ItemBalance {
     let nwn_id = object::id(nwn);
     let nwn_key = nwn.key;
     assert!(access::is_authorized(owner_cap, nwn_id), ENetworkNodeNotAuthorized);
     admin_acl.verify_sponsor(ctx);
-    nwn.fuel.withdraw(nwn_id, nwn_key, quantity);
+    nwn.fuel.withdraw(quantity, nwn_id, nwn_key)
 }
 
 public fun online(nwn: &mut NetworkNode, owner_cap: &OwnerCap<NetworkNode>, clock: &Clock) {
@@ -155,6 +159,12 @@ public fun offline(
 }
 
 // === View Functions ===
+
+/// Returns the network node's tenant string.
+public fun tenant(nwn: &NetworkNode): String {
+    in_game_id::tenant(&nwn.key)
+}
+
 /// Returns the list of connected assembly IDs
 public fun connected_assemblies(nwn: &NetworkNode): vector<ID> {
     nwn.connected_assembly_ids
@@ -318,12 +328,13 @@ public fun unanchor(nwn: &mut NetworkNode, _: &AdminCap): HandleOrphanedAssembli
 /// Must be called after processing all assemblies from the hot potato returned by unanchor
 public fun destroy_network_node(
     mut nwn: NetworkNode,
+    item_registry: &ItemRegistry,
     orphaned_assemblies: HandleOrphanedAssemblies,
     _: &AdminCap,
 ) {
     let nwn_id = object::id(&nwn);
     orphaned_assemblies.destroy_orphaned_assemblies();
-    // Clean up connected assembliesd
+    // Clean up connected assemblies
     let assembly_ids = copy_connected_assembly_ids(&nwn);
     if (assembly_ids.length() > 0) {
         disconnect_assemblies(&mut nwn, assembly_ids);
@@ -341,8 +352,8 @@ public fun destroy_network_node(
         ..,
     } = nwn;
 
-    // Delete fuel and energy
-    fuel::delete(fuel, nwn_id, key);
+    // Delete fuel (destroys remaining balance) and energy
+    fuel::delete(fuel, item_registry, nwn_id, key);
     energy::delete(energy_source);
     connected_assembly_ids.destroy_empty();
 
@@ -370,7 +381,7 @@ public fun update_fuel(
         nwn.fuel.update(nwn_id, nwn.key, fuel_config, clock);
 
         if (!nwn.fuel.is_burning()) {
-            // Fuel depleted - bring network node offline
+            // Fuel depleted — bring network node offline
             if (nwn.energy_source.current_energy_production() > 0) {
                 nwn.energy_source.stop_energy_production(nwn_id);
             };
@@ -489,6 +500,7 @@ fun disconnect_assemblies(nwn: &mut NetworkNode, assembly_ids: vector<ID>) {
         i = i + 1;
     };
 }
+
 // === Test Functions ===
 #[test_only]
 public fun fuel(network_node: &NetworkNode): &Fuel {
@@ -508,15 +520,14 @@ public fun status(network_node: &NetworkNode): &AssemblyStatus {
 #[test_only]
 public fun deposit_fuel_test(
     nwn: &mut NetworkNode,
+    item_registry: &ItemRegistry,
     owner_cap: &OwnerCap<NetworkNode>,
-    type_id: u64,
-    volume: u64,
-    quantity: u64,
+    balance: ItemBalance,
     clock: &Clock,
 ) {
     let nwn_id = object::id(nwn);
     assert!(access::is_authorized(owner_cap, nwn_id), ENetworkNodeNotAuthorized);
-    nwn.fuel.deposit(nwn_id, nwn.key, type_id, volume, quantity, clock);
+    nwn.fuel.deposit(item_registry, balance, nwn_id, nwn.key, clock);
 }
 
 #[test_only]
@@ -524,8 +535,8 @@ public fun withdraw_fuel_test(
     nwn: &mut NetworkNode,
     owner_cap: &OwnerCap<NetworkNode>,
     quantity: u64,
-) {
+): ItemBalance {
     let nwn_id = object::id(nwn);
     assert!(access::is_authorized(owner_cap, nwn_id), ENetworkNodeNotAuthorized);
-    nwn.fuel.withdraw(nwn_id, nwn.key, quantity);
+    nwn.fuel.withdraw(quantity, nwn_id, nwn.key)
 }

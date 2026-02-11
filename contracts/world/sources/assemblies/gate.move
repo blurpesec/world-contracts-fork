@@ -61,6 +61,8 @@ const EGateHasEnergySource: vector<u8> = b"Gate has an energy source";
 const EGateOnline: vector<u8> = b"Gate should be offline";
 #[error(code = 14)]
 const EGatesLinked: vector<u8> = b"Gates are linked";
+#[error(code = 15)]
+const ETenantMismatch: vector<u8> = b"Tenant mismatch";
 
 // === Structs ===
 public struct GateConfig has key {
@@ -172,6 +174,9 @@ public fun link_gates(
         access::is_authorized(destination_gate_owner_cap, destination_gate_id),
         EGateNotAuthorized,
     );
+
+    // Verify gates share the same tenant
+    assert!(in_game_id::tenant(&source_gate.key) == in_game_id::tenant(&destination_gate.key), ETenantMismatch);
 
     // Verify gates are not already linked
     assert!(
@@ -288,6 +293,7 @@ public fun update_energy_source_connected_gate(
     mut update_energy_sources: UpdateEnergySources,
     network_node: &NetworkNode,
 ): UpdateEnergySources {
+    assert!(in_game_id::tenant(&gate.key) == network_node.tenant(), ETenantMismatch);
     if (update_energy_sources.update_energy_sources_ids_length() > 0) {
         let gate_id = object::id(gate);
         let found = update_energy_sources.remove_energy_sources_assembly_id(gate_id);
@@ -457,6 +463,7 @@ public fun update_energy_source(gate: &mut Gate, network_node: &mut NetworkNode,
     let gate_id = object::id(gate);
     let nwn_id = object::id(network_node);
     assert!(!gate.status.is_online(), ENotOnline);
+    assert!(in_game_id::tenant(&gate.key) == network_node.tenant(), ETenantMismatch);
 
     network_node.connect_assembly(gate_id);
     gate.energy_source_id = option::some(nwn_id);

@@ -1,13 +1,14 @@
 #[test_only]
 module world::gate_tests;
 
-use std::{bcs, string::utf8};
+use std::{bcs, string::{utf8, String}};
 use sui::{clock, test_scenario as ts};
 use world::{
     access::{AdminCap, OwnerCap, ServerAddressRegistry},
     character::{Self, Character},
     energy::EnergyConfig,
     gate::{Self, Gate, GateConfig, JumpPermit},
+    item_balance::{Self, ItemRegistry},
     location,
     network_node::{Self, NetworkNode},
     object_registry::ObjectRegistry,
@@ -27,8 +28,7 @@ const NWN_ITEM_ID: u64 = 5000;
 const FUEL_MAX_CAPACITY: u64 = 1000;
 const FUEL_BURN_RATE_IN_MS: u64 = 3600 * MS_PER_SECOND;
 const MAX_PRODUCTION: u64 = 100;
-const FUEL_TYPE_ID: u64 = 1;
-const FUEL_VOLUME: u64 = 10;
+// Fuel constants removed — fuel deposits now use ItemBalance from ItemRegistry
 
 // Mock extension witness types
 public struct GateAuth has drop {}
@@ -146,23 +146,26 @@ fun create_gate(ts: &mut ts::Scenario, character_id: ID, nwn_id: ID, item_id: u6
 }
 
 fun bring_network_node_online(ts: &mut ts::Scenario, character_id: ID, nwn_id: ID) {
+    let fuel_asset_id = test_helpers::register_fuel_item(ts);
     ts::next_tx(ts, user_a());
     {
         let clock = clock::create_for_testing(ts.ctx());
         let mut nwn = ts::take_shared_by_id<NetworkNode>(ts, nwn_id);
         let mut character = ts::take_shared_by_id<Character>(ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(ts);
         let nwn_owner_cap_id = nwn.owner_cap_id();
         let nwn_ticket = ts::receiving_ticket_by_id<OwnerCap<NetworkNode>>(nwn_owner_cap_id);
         let owner_cap = character.borrow_owner_cap<NetworkNode>(nwn_ticket, ts.ctx());
+        let balance = item_balance::test_increase_supply(&item_registry, fuel_asset_id, 10);
         nwn.deposit_fuel_test(
+            &item_registry,
             &owner_cap,
-            FUEL_TYPE_ID,
-            FUEL_VOLUME,
-            10,
+            balance,
             &clock,
         );
         nwn.online(&owner_cap, &clock);
         character.return_owner_cap(owner_cap);
+        ts::return_shared(item_registry);
         ts::return_shared(nwn);
         ts::return_shared(character);
         clock.destroy_for_testing();
@@ -356,6 +359,7 @@ fun unanchor_orphan_gate() {
     {
         let mut nwn = ts::take_shared_by_id<NetworkNode>(&ts, nwn_id);
         let energy_config = ts::take_shared<EnergyConfig>(&ts);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
         let admin_cap = ts::take_from_sender<AdminCap>(&ts);
         let orphaned_assemblies = nwn.unanchor(&admin_cap);
         let mut gate_a = ts::take_shared_by_id<Gate>(&ts, gate_a_id);
@@ -370,9 +374,10 @@ fun unanchor_orphan_gate() {
             &mut nwn,
             &energy_config,
         );
-        nwn.destroy_network_node(updated_orphaned_assemblies, &admin_cap);
+        nwn.destroy_network_node(&item_registry, updated_orphaned_assemblies, &admin_cap);
         ts::return_shared(gate_a);
         ts::return_shared(gate_b);
+        ts::return_shared(item_registry);
         ts::return_shared(energy_config);
         ts::return_to_sender(&ts, admin_cap);
     };
@@ -1030,6 +1035,177 @@ fun unanchor_orphan_gate_fails_when_energy_source_set() {
         let gate_b = ts::take_shared_by_id<Gate>(&ts, gate_b_id);
         gate_a.unanchor_orphan(&admin_cap);
         gate_b.unanchor_orphan(&admin_cap);
+        ts::return_to_sender(&ts, admin_cap);
+    };
+    ts::end(ts);
+}
+
+// === Tenant mismatch tests ===
+
+const DIFFERENT_TENANT: vector<u8> = b"DIFFERENT";
+
+fun create_character_with_tenant(
+    ts: &mut ts::Scenario,
+    user: address,
+    item_id: u32,
+    char_tenant: String,
+): ID {
+    ts::next_tx(ts, admin());
+    let admin_cap = ts::take_from_sender<AdminCap>(ts);
+    let mut registry = ts::take_shared<ObjectRegistry>(ts);
+    let character = character::create_character(
+        &mut registry,
+        &admin_cap,
+        item_id,
+        char_tenant,
+        100,
+        user,
+        utf8(b"name"),
+        ts.ctx(),
+    );
+    let character_id = object::id(&character);
+    character.share_character(&admin_cap);
+    ts::return_shared(registry);
+    ts::return_to_sender(ts, admin_cap);
+    character_id
+}
+
+/// Test that linking gates from different tenants fails
+/// Scenario: Gate A is TEST tenant, gate B is DIFFERENT tenant
+/// Expected: Transaction aborts with gate::ETenantMismatch
+#[test]
+#[expected_failure(abort_code = gate::ETenantMismatch)]
+fun test_link_gates_fail_tenant_mismatch() {
+    let mut ts = ts::begin(governor());
+    setup(&mut ts);
+
+    // Gate A under TEST tenant
+    let character_a_id = create_character(&mut ts, user_a(), 201);
+    let nwn_a_id = create_network_node(&mut ts, character_a_id);
+    let gate_a_id = create_gate(&mut ts, character_a_id, nwn_a_id, GATE_ITEM_ID_1);
+
+    // Gate B under DIFFERENT tenant (same user so borrow_owner_cap works in one tx)
+    let character_b_id = create_character_with_tenant(
+        &mut ts, user_a(), 202, DIFFERENT_TENANT.to_string(),
+    );
+    let nwn_b_id = create_network_node(&mut ts, character_b_id);
+    let gate_b_id = create_gate(&mut ts, character_b_id, nwn_b_id, GATE_ITEM_ID_2);
+
+    // Try to link gates from different tenants
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut gate_a = ts::take_shared_by_id<Gate>(&ts, gate_a_id);
+        let mut gate_b = ts::take_shared_by_id<Gate>(&ts, gate_b_id);
+        let gate_config = ts::take_shared<GateConfig>(&ts);
+        let server_registry = ts::take_shared<ServerAddressRegistry>(&ts);
+        let mut character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let mut character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
+
+        let owner_cap_a = character_a.borrow_owner_cap<Gate>(
+            ts::receiving_ticket_by_id<OwnerCap<Gate>>(gate_a.owner_cap_id()),
+            ts.ctx(),
+        );
+        let owner_cap_b = character_b.borrow_owner_cap<Gate>(
+            ts::receiving_ticket_by_id<OwnerCap<Gate>>(gate_b.owner_cap_id()),
+            ts.ctx(),
+        );
+
+        let proof = test_helpers::construct_location_proof(
+            test_helpers::get_verified_location_hash(),
+        );
+        let proof_bytes = bcs::to_bytes(&proof);
+        let clock = clock::create_for_testing(ts.ctx());
+
+        gate_a.link_gates(
+            &mut gate_b,
+            &character_a,
+            &gate_config,
+            &server_registry,
+            &owner_cap_a,
+            &owner_cap_b,
+            proof_bytes,
+            &clock,
+            ts.ctx(),
+        );
+
+        clock.destroy_for_testing();
+        character_a.return_owner_cap(owner_cap_a);
+        character_b.return_owner_cap(owner_cap_b);
+        ts::return_shared(character_a);
+        ts::return_shared(character_b);
+        ts::return_shared(gate_a);
+        ts::return_shared(gate_b);
+        ts::return_shared(gate_config);
+        ts::return_shared(server_registry);
+    };
+    ts::end(ts);
+}
+
+/// Test that updating gate energy source fails when gate and NWN have different tenants
+/// Scenario: Gate is DIFFERENT tenant, admin tries to assign TEST tenant NWN
+/// Expected: Transaction aborts with gate::ETenantMismatch
+#[test]
+#[expected_failure(abort_code = gate::ETenantMismatch)]
+fun test_update_energy_source_fail_tenant_mismatch() {
+    let mut ts = ts::begin(governor());
+    setup(&mut ts);
+
+    // NWN under TEST tenant
+    let character_test_id = create_character(&mut ts, user_a(), 301);
+    let nwn_test_id = create_network_node(&mut ts, character_test_id);
+
+    // Gate under DIFFERENT tenant (anchored to its own NWN)
+    let character_diff_id = create_character_with_tenant(
+        &mut ts, user_b(), 302, DIFFERENT_TENANT.to_string(),
+    );
+    let nwn_diff_id = create_network_node(&mut ts, character_diff_id);
+    let gate_diff_id = create_gate(&mut ts, character_diff_id, nwn_diff_id, GATE_ITEM_ID_1);
+
+    // Admin tries to re-assign DIFFERENT tenant gate to TEST tenant NWN → should fail
+    ts::next_tx(&mut ts, admin());
+    {
+        let mut gate_obj = ts::take_shared_by_id<Gate>(&ts, gate_diff_id);
+        let mut nwn = ts::take_shared_by_id<NetworkNode>(&ts, nwn_test_id);
+        let admin_cap = ts::take_from_sender<AdminCap>(&ts);
+        gate_obj.update_energy_source(&mut nwn, &admin_cap);
+        ts::return_shared(gate_obj);
+        ts::return_shared(nwn);
+        ts::return_to_sender(&ts, admin_cap);
+    };
+    ts::end(ts);
+}
+
+/// Test that update_energy_source_connected_gate fails with tenant mismatch
+/// Scenario: Admin connects DIFFERENT tenant gate to TEST tenant NWN via hot potato
+/// Expected: Transaction aborts with gate::ETenantMismatch
+#[test]
+#[expected_failure(abort_code = gate::ETenantMismatch)]
+fun test_update_energy_source_connected_gate_fail_tenant_mismatch() {
+    let mut ts = ts::begin(governor());
+    setup(&mut ts);
+
+    let character_test_id = create_character(&mut ts, user_a(), 401);
+    let nwn_test_id = create_network_node(&mut ts, character_test_id);
+
+    let character_diff_id = create_character_with_tenant(
+        &mut ts, user_b(), 402, DIFFERENT_TENANT.to_string(),
+    );
+    let nwn_diff_id = create_network_node(&mut ts, character_diff_id);
+    let gate_diff_id = create_gate(&mut ts, character_diff_id, nwn_diff_id, GATE_ITEM_ID_1);
+
+    // Admin connects DIFFERENT tenant gate to TEST tenant NWN and tries to consume hot potato
+    ts::next_tx(&mut ts, admin());
+    {
+        let mut nwn = ts::take_shared_by_id<NetworkNode>(&ts, nwn_test_id);
+        let mut gate_obj = ts::take_shared_by_id<Gate>(&ts, gate_diff_id);
+        let admin_cap = ts::take_from_sender<AdminCap>(&ts);
+
+        let update = network_node::connect_assemblies(&mut nwn, &admin_cap, vector[gate_diff_id]);
+        let update = gate_obj.update_energy_source_connected_gate(update, &nwn);
+        network_node::destroy_update_energy_sources(update);
+
+        ts::return_shared(gate_obj);
+        ts::return_shared(nwn);
         ts::return_to_sender(&ts, admin_cap);
     };
     ts::end(ts);

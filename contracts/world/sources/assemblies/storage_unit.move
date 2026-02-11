@@ -27,7 +27,8 @@ use world::{
     character::Character,
     energy::EnergyConfig,
     in_game_id::{Self, TenantItemId},
-    inventory::{Self, Inventory, Item},
+    inventory::{Self, Inventory},
+    item_balance::{ItemBalance, ItemRegistry},
     location::{Self, Location},
     metadata::{Self, Metadata},
     network_node::{NetworkNode, OfflineAssemblies, HandleOrphanedAssemblies, UpdateEnergySources},
@@ -52,7 +53,7 @@ const EInventoryNotAuthorized: vector<u8> = b"Inventory Access not authorized";
 #[error(code = 6)]
 const ENotOnline: vector<u8> = b"Storage Unit is not online";
 #[error(code = 7)]
-const ETenantMismatch: vector<u8> = b"Item cannot be transferred across tenants";
+const ETenantMismatch: vector<u8> = b"Tenant mismatch";
 #[error(code = 8)]
 const ENetworkNodeMismatch: vector<u8> =
     b"Provided network node does not match the storage unit's configured energy source";
@@ -134,14 +135,17 @@ public fun offline(
     storage_unit.status.offline(storage_unit_id, storage_unit.key);
 }
 
-/// Bridges items from chain to game inventory
+/// Bridges items from chain to game inventory.
+///
+/// Verifies proximity, splits the balance out of the inventory, and destroys it.
 public fun chain_item_to_game_inventory<T: key>(
     storage_unit: &mut StorageUnit,
+    item_registry: &ItemRegistry,
     server_registry: &ServerAddressRegistry,
     character: &Character,
     owner_cap: &OwnerCap<T>,
-    type_id: u64,
-    quantity: u32,
+    asset_id: ID,
+    quantity: u64,
     location_proof: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
@@ -156,24 +160,27 @@ public fun chain_item_to_game_inventory<T: key>(
         &mut storage_unit.id,
         owner_cap_id,
     );
-    inventory.burn_items_with_proof(
+    inventory.burn_with_proof(
+        item_registry,
+        asset_id,
+        quantity,
         storage_unit_id,
         storage_unit.key,
         character,
         server_registry,
         &storage_unit.location,
         location_proof,
-        type_id,
-        quantity,
         clock,
         ctx,
     );
 }
 
+/// Deposits an `ItemBalance` into storage via an extension contract.
 public fun deposit_item<Auth: drop>(
     storage_unit: &mut StorageUnit,
+    item_registry: &ItemRegistry,
     character: &Character,
-    item: Item,
+    balance: ItemBalance,
     _: Auth,
     _: &mut TxContext,
 ) {
@@ -183,26 +190,30 @@ public fun deposit_item<Auth: drop>(
         EExtensionNotAuthorized,
     );
     assert!(storage_unit.status.is_online(), ENotOnline);
-    assert!(inventory::tenant(&item) == storage_unit.key.tenant(), ETenantMismatch);
+
     let inventory = df::borrow_mut<ID, Inventory>(
         &mut storage_unit.id,
         storage_unit.owner_cap_id,
     );
-    inventory.deposit_item(
+    inventory.deposit(
+        item_registry,
+        balance,
         storage_unit_id,
         storage_unit.key,
         character,
-        item,
     );
 }
 
+/// Withdraws an `ItemBalance` from storage via an extension contract.
 public fun withdraw_item<Auth: drop>(
     storage_unit: &mut StorageUnit,
+    item_registry: &ItemRegistry,
     character: &Character,
     _: Auth,
-    type_id: u64,
+    asset_id: ID,
+    quantity: u64,
     _: &mut TxContext,
-): Item {
+): ItemBalance {
     let storage_unit_id = object::id(storage_unit);
     assert!(
         storage_unit.extension.contains(&type_name::with_defining_ids<Auth>()),
@@ -213,17 +224,21 @@ public fun withdraw_item<Auth: drop>(
         storage_unit.owner_cap_id,
     );
 
-    inventory.withdraw_item(
+    inventory.withdraw(
+        item_registry,
+        asset_id,
+        quantity,
         storage_unit_id,
         storage_unit.key,
         character,
-        type_id,
     )
 }
 
+/// Deposits an `ItemBalance` via owner direct access with proximity proof.
 public fun deposit_by_owner<T: key>(
     storage_unit: &mut StorageUnit,
-    item: Item,
+    item_registry: &ItemRegistry,
+    balance: ItemBalance,
     server_registry: &ServerAddressRegistry,
     character: &Character,
     owner_cap: &OwnerCap<T>,
@@ -236,13 +251,6 @@ public fun deposit_by_owner<T: key>(
     let owner_cap_id = object::id(owner_cap);
     assert!(storage_unit.status.is_online(), ENotOnline);
     check_inventory_authorization(owner_cap, storage_unit, character.id());
-    assert!(inventory::tenant(&item) == storage_unit.key.tenant(), ETenantMismatch);
-
-    // This check is only required for ephemeral inventory
-    location::verify_same_location(
-        storage_unit.location.hash(),
-        item.get_item_location_hash(),
-    );
 
     location::verify_proximity_proof_from_bytes(
         server_registry,
@@ -257,24 +265,28 @@ public fun deposit_by_owner<T: key>(
         owner_cap_id,
     );
 
-    inventory.deposit_item(
+    inventory.deposit(
+        item_registry,
+        balance,
         storage_unit_id,
         storage_unit.key,
         character,
-        item,
     );
 }
 
+/// Withdraws an `ItemBalance` via owner direct access with proximity proof.
 public fun withdraw_by_owner<T: key>(
     storage_unit: &mut StorageUnit,
+    item_registry: &ItemRegistry,
     server_registry: &ServerAddressRegistry,
     character: &Character,
     owner_cap: &OwnerCap<T>,
-    type_id: u64,
+    asset_id: ID,
+    quantity: u64,
     proximity_proof: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
-): Item {
+): ItemBalance {
     assert!(character.character_address() == ctx.sender(), ESenderCannotAccessCharacter);
     let storage_unit_id = object::id(storage_unit);
     let owner_cap_id = object::id(owner_cap);
@@ -294,11 +306,13 @@ public fun withdraw_by_owner<T: key>(
         owner_cap_id,
     );
 
-    inventory.withdraw_item(
+    inventory.withdraw(
+        item_registry,
+        asset_id,
+        quantity,
         storage_unit_id,
         storage_unit.key,
         character,
-        type_id,
     )
 }
 
@@ -409,6 +423,7 @@ public fun update_energy_source(
     let storage_unit_id = object::id(storage_unit);
     let nwn_id = object::id(network_node);
     assert!(!storage_unit.status.is_online(), EStorageUnitInvalidState);
+    assert!(in_game_id::tenant(&storage_unit.key) == network_node.tenant(), ETenantMismatch);
 
     network_node.connect_assembly(storage_unit_id);
     storage_unit.energy_source_id = option::some(nwn_id);
@@ -422,6 +437,7 @@ public fun update_energy_source_connected_storage_unit(
     network_node: &NetworkNode,
     _: &AdminCap,
 ): UpdateEnergySources {
+    assert!(in_game_id::tenant(&storage_unit.key) == network_node.tenant(), ETenantMismatch);
     if (update_energy_sources.update_energy_sources_ids_length() > 0) {
         let storage_unit_id = object::id(storage_unit);
         let found = update_energy_sources.remove_energy_sources_assembly_id(
@@ -491,6 +507,7 @@ public fun offline_orphaned_storage_unit(
 // So we burn the items and delete the object
 public fun unanchor(
     storage_unit: StorageUnit,
+    item_registry: &ItemRegistry,
     network_node: &mut NetworkNode,
     energy_config: &EnergyConfig,
     _: &AdminCap,
@@ -522,9 +539,10 @@ public fun unanchor(
     status.unanchor(storage_unit_id, key);
     location.remove();
 
-    // loop through inventory_keys
+    // Delete all inventories (destroys remaining balances)
     inventory_keys.destroy!(
         |inventory_key| df::remove<ID, Inventory>(&mut id, inventory_key).delete(
+            item_registry,
             storage_unit_id,
             key,
         ),
@@ -534,7 +552,11 @@ public fun unanchor(
     id.delete();
 }
 
-public fun unanchor_orphan(storage_unit: StorageUnit, _: &AdminCap) {
+public fun unanchor_orphan(
+    storage_unit: StorageUnit,
+    item_registry: &ItemRegistry,
+    _: &AdminCap,
+) {
     let StorageUnit {
         mut id,
         key,
@@ -550,6 +572,7 @@ public fun unanchor_orphan(storage_unit: StorageUnit, _: &AdminCap) {
     let storage_unit_id = object::uid_to_inner(&id);
     inventory_keys.destroy!(
         |inventory_key| df::remove<ID, Inventory>(&mut id, inventory_key).delete(
+            item_registry,
             storage_unit_id,
             key,
         ),
@@ -561,16 +584,17 @@ public fun unanchor_orphan(storage_unit: StorageUnit, _: &AdminCap) {
     id.delete();
 }
 
-/// Bridges items from game to chain inventory
+/// Bridges items from game to chain inventory (mint path).
+///
+/// Creates an `ItemBalance` and deposits into the inventory.
 public fun game_item_to_chain_inventory<T: key>(
     storage_unit: &mut StorageUnit,
+    item_registry: &ItemRegistry,
     admin_acl: &AdminACL,
     character: &Character,
     owner_cap: &OwnerCap<T>,
-    item_id: u64,
-    type_id: u64,
-    volume: u64,
-    quantity: u32,
+    asset_id: ID,
+    quantity: u64,
     ctx: &mut TxContext,
 ) {
     assert!(character.character_address() == ctx.sender(), ESenderCannotAccessCharacter);
@@ -580,7 +604,7 @@ public fun game_item_to_chain_inventory<T: key>(
     assert!(storage_unit.status.is_online(), ENotOnline);
     check_inventory_authorization(owner_cap, storage_unit, character.id());
 
-    // create a ephemeral inventory if it does not exists for a character
+    // create an ephemeral inventory if it does not exist for a character
     if (!df::exists_(&storage_unit.id, owner_cap_id)) {
         let owner_inv = df::borrow<ID, Inventory>(
             &storage_unit.id,
@@ -596,17 +620,13 @@ public fun game_item_to_chain_inventory<T: key>(
         &mut storage_unit.id,
         owner_cap_id,
     );
-    inventory.mint_items(
+    inventory.mint(
+        item_registry,
+        asset_id,
+        quantity,
         storage_unit_id,
         storage_unit.key,
         character,
-        storage_unit.key.tenant(),
-        item_id,
-        type_id,
-        volume,
-        quantity,
-        storage_unit.location.hash(),
-        ctx,
     )
 }
 
@@ -692,15 +712,15 @@ public fun borrow_status_mut(storage_unit: &mut StorageUnit): &mut AssemblyStatu
 }
 
 #[test_only]
-public fun item_quantity(storage_unit: &StorageUnit, owner_cap_id: ID, type_id: u64): u32 {
+public fun item_quantity(storage_unit: &StorageUnit, owner_cap_id: ID, asset_id: ID): u64 {
     let inventory = df::borrow<ID, Inventory>(&storage_unit.id, owner_cap_id);
-    inventory.item_quantity(type_id)
+    inventory.item_quantity(asset_id)
 }
 
 #[test_only]
-public fun contains_item(storage_unit: &StorageUnit, owner_cap_id: ID, type_id: u64): bool {
+public fun contains_item(storage_unit: &StorageUnit, owner_cap_id: ID, asset_id: ID): bool {
     let inventory = df::borrow<ID, Inventory>(&storage_unit.id, owner_cap_id);
-    inventory.contains_item(type_id)
+    inventory.contains_item(asset_id)
 }
 
 #[test_only]
@@ -716,11 +736,12 @@ public fun has_inventory(storage_unit: &StorageUnit, owner_cap_id: ID): bool {
 #[test_only]
 public fun chain_item_to_game_inventory_test<T: key>(
     storage_unit: &mut StorageUnit,
+    item_registry: &ItemRegistry,
     server_registry: &ServerAddressRegistry,
     character: &Character,
     owner_cap: &OwnerCap<T>,
-    type_id: u64,
-    quantity: u32,
+    asset_id: ID,
+    quantity: u64,
     location_proof: vector<u8>,
     ctx: &mut TxContext,
 ) {
@@ -731,15 +752,16 @@ public fun chain_item_to_game_inventory_test<T: key>(
     assert!(storage_unit.status.is_online(), ENotOnline);
 
     let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, owner_cap_id);
-    inventory.burn_items_with_proof_test(
+    inventory.burn_with_proof_test(
+        item_registry,
+        asset_id,
+        quantity,
         storage_unit_id,
         storage_unit.key,
         character,
         server_registry,
         &storage_unit.location,
         location_proof,
-        type_id,
-        quantity,
         ctx,
     );
 }
@@ -747,12 +769,11 @@ public fun chain_item_to_game_inventory_test<T: key>(
 #[test_only]
 public fun game_item_to_chain_inventory_test<T: key>(
     storage_unit: &mut StorageUnit,
+    item_registry: &ItemRegistry,
     character: &Character,
     owner_cap: &OwnerCap<T>,
-    item_id: u64,
-    type_id: u64,
-    volume: u64,
-    quantity: u32,
+    asset_id: ID,
+    quantity: u64,
     ctx: &mut TxContext,
 ) {
     assert!(character.character_address() == ctx.sender(), ESenderCannotAccessCharacter);
@@ -761,7 +782,7 @@ public fun game_item_to_chain_inventory_test<T: key>(
     assert!(storage_unit.status.is_online(), ENotOnline);
     check_inventory_authorization(owner_cap, storage_unit, character.id());
 
-    // create a ephemeral inventory if it does not exists for a character
+    // create an ephemeral inventory if it does not exist for a character
     if (!df::exists_(&storage_unit.id, owner_cap_id)) {
         let owner_inv = df::borrow<ID, Inventory>(
             &storage_unit.id,
@@ -777,16 +798,12 @@ public fun game_item_to_chain_inventory_test<T: key>(
         &mut storage_unit.id,
         owner_cap_id,
     );
-    inventory.mint_items(
+    inventory.mint(
+        item_registry,
+        asset_id,
+        quantity,
         storage_unit_id,
         storage_unit.key,
         character,
-        storage_unit.key.tenant(),
-        item_id,
-        type_id,
-        volume,
-        quantity,
-        storage_unit.location.hash(),
-        ctx,
     )
 }

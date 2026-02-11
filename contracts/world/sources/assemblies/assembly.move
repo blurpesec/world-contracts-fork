@@ -31,6 +31,8 @@ const ENetworkNodeDoesNotExist: vector<u8> =
 const EAssemblyOnline: vector<u8> = b"Assembly should be offline";
 #[error(code = 6)]
 const EAssemblyHasEnergySource: vector<u8> = b"Assembly has an energy source";
+#[error(code = 7)]
+const ETenantMismatch: vector<u8> = b"Tenant mismatch";
 
 // === Structs ===
 // TODO: find an elegant way to decouple the common fields across all structs
@@ -179,6 +181,7 @@ public fun update_energy_source(
     let assembly_id = object::id(assembly);
     let nwn_id = object::id(network_node);
     assert!(!assembly.status.is_online(), EAssemblyOnline);
+    assert!(in_game_id::tenant(&assembly.key) == network_node.tenant(), ETenantMismatch);
 
     network_node.connect_assembly(assembly_id);
     assembly.energy_source_id = option::some(nwn_id);
@@ -192,6 +195,7 @@ public fun update_energy_source_connected_assembly(
     network_node: &NetworkNode,
     _: &AdminCap,
 ): UpdateEnergySources {
+    assert!(in_game_id::tenant(&assembly.key) == network_node.tenant(), ETenantMismatch);
     if (update_energy_sources.update_energy_sources_ids_length() > 0) {
         let assembly_id = object::id(assembly);
         let found = update_energy_sources.remove_energy_sources_assembly_id(

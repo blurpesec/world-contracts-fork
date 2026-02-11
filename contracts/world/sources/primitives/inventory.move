@@ -1,67 +1,72 @@
-/// This module implements the logic of inventory operations such as depositing, withdrawing and transferring items between inventories.
+/// Inventory module — capacity-aware container for `ItemBalance` entries.
+///
+/// each item in an inventory is represented by an `ItemBalance` keyed by `asset_id` (registered in `ItemRegistry`).
 ///
 /// Bridging items from game to chain and back:
 /// - The game is the “trusted bridge” for bringing items from the game to the chain.
-/// - To bridge an item from game to chain, the game server will call an authenticated on-chain function to mint the item into an on-chain inventory.
-/// - To bridge an item from chain to game, the chain emits an event and burns the on-chain item. The game server listens to the event to create the item in the game.
-/// - The `game to chain`(mint) action is restricted by an admin capability and the `chain to game`(burn) action is restricted by a proximity proof.
+/// - **Game → Chain (mint):** admin/sponsor calls `mint` which creates a balance
+///   and deposits it into the inventory.
+/// - **Chain → Game (burn):** player calls `burn_with_proof` which verifies proximity,
+///   splits the balance out of the inventory, and destroys it.
+///
+/// Transfers between inventories use `deposit` / `withdraw` (no supply change).
+///
+/// Supply tracking is off-chain via events; `ItemRegistry` is read-only (`&ItemRegistry`)
+/// on all paths to prevent shared-object congestion.
+///
+/// ## First-time item types
+///
+/// All functions assume the item type is already registered in `ItemRegistry`.
+/// For the first mint of a new item type, the backend composes registration and minting
+/// atomically in a single PTB — see `item_balance` module docs for the pattern.
 module world::inventory;
 
-use std::string::String;
 use sui::{clock::Clock, event, vec_map::{Self, VecMap}};
 use world::{
     access::ServerAddressRegistry,
     character::Character,
-    in_game_id::TenantItemId,
+    in_game_id::{Self, TenantItemId},
+    item_balance::{Self, ItemBalance, ItemRegistry},
     location::{Self, Location}
 };
 
 // === Errors ===
 #[error(code = 0)]
-const ETypeIdEmpty: vector<u8> = b"Type ID cannot be empty";
-#[error(code = 1)]
 const EInventoryInvalidCapacity: vector<u8> = b"Inventory Capacity cannot be 0";
-#[error(code = 2)]
+#[error(code = 1)]
 const EInventoryInsufficientCapacity: vector<u8> = b"Insufficient capacity in the inventory";
+#[error(code = 2)]
+const EItemDoesNotExist: vector<u8> = b"Item not found in inventory";
 #[error(code = 3)]
-const EItemDoesNotExist: vector<u8> = b"Item not found";
-#[error(code = 4)]
 const EInventoryInsufficientQuantity: vector<u8> = b"Insufficient quantity in inventory";
+#[error(code = 4)]
+const ETenantMismatch: vector<u8> = b"Tenant mismatch";
 
 // === Structs ===
 
-// The inventory struct uses the id of the assembly it is attached to, so it does not have a key.
-// Note: Gas cost is high, lookup and insert complexity for VecMap is o(n). The alternative is to use a Table and a separate Vector.
-// However it is ideal for this use case.
+/// Capacity-gated container for item balances.
+/// Stored as a dynamic field on parent objects (StorageUnit, etc.) — no `key` ability.
 public struct Inventory has store {
     max_capacity: u64,
     used_capacity: u64,
-    items: VecMap<u64, Item>,
-}
-
-// TODO: Use Sui's `Coin<T>` and `Balance<T>` for stackability
-// TODO: Move item as its own module
-// Item has a key as its minted on-chain and can be transferred from one inventory to another.
-// It has store ability as it needs to be wrapped in a parent. Item should always have a parent eg: Inventory, ship etc.
-public struct Item has key, store {
-    id: UID,
-    tenant: String,
-    type_id: u64,
-    item_id: u64,
-    volume: u64,
-    quantity: u32,
-    location: Location,
+    /// Balances keyed by `asset_id`.  Small-N VecMap is fine for typical inventory sizes.
+    balances: VecMap<ID, ItemBalance>,
+    /// Per-unit volume locked in at first deposit for each asset slot.
+    /// Ensures withdraw/burn frees exactly the capacity that was claimed,
+    /// even if the registry volume is changed after deposit.
+    slot_volumes: VecMap<ID, u64>,
 }
 
 // === Events ===
+
 public struct ItemMintedEvent has copy, drop {
     assembly_id: ID,
     assembly_key: TenantItemId,
     character_id: ID,
     character_key: TenantItemId,
-    item_id: u64,
+    asset_id: ID,
     type_id: u64,
-    quantity: u32,
+    quantity: u64,
 }
 
 public struct ItemBurnedEvent has copy, drop {
@@ -69,9 +74,9 @@ public struct ItemBurnedEvent has copy, drop {
     assembly_key: TenantItemId,
     character_id: ID,
     character_key: TenantItemId,
-    item_id: u64,
+    asset_id: ID,
     type_id: u64,
-    quantity: u32,
+    quantity: u64,
 }
 
 public struct ItemDepositedEvent has copy, drop {
@@ -79,9 +84,9 @@ public struct ItemDepositedEvent has copy, drop {
     assembly_key: TenantItemId,
     character_id: ID,
     character_key: TenantItemId,
-    item_id: u64,
+    asset_id: ID,
     type_id: u64,
-    quantity: u32,
+    quantity: u64,
 }
 
 public struct ItemWithdrawnEvent has copy, drop {
@@ -89,34 +94,34 @@ public struct ItemWithdrawnEvent has copy, drop {
     assembly_key: TenantItemId,
     character_id: ID,
     character_key: TenantItemId,
-    item_id: u64,
+    asset_id: ID,
     type_id: u64,
-    quantity: u32,
+    quantity: u64,
 }
 
-public struct ItemDestroyedEvent has copy, drop {
+public struct InventoryDestroyedEvent has copy, drop {
     assembly_id: ID,
     assembly_key: TenantItemId,
-    item_id: u64,
+    asset_id: ID,
     type_id: u64,
-    quantity: u32,
+    quantity: u64,
 }
 
 // === View Functions ===
-public fun tenant(item: &Item): String {
-    item.tenant
-}
 
-public fun contains_item(inventory: &Inventory, type_id: u64): bool {
-    inventory.items.contains(&type_id)
-}
-
-public fun get_item_location_hash(item: &Item): vector<u8> {
-    item.location.hash()
+public fun contains_item(inventory: &Inventory, asset_id: ID): bool {
+    inventory.balances.contains(&asset_id)
 }
 
 public fun max_capacity(inventory: &Inventory): u64 {
     inventory.max_capacity
+}
+
+public fun balance_value(inventory: &Inventory, asset_id: ID): u64 {
+    if (!inventory.balances.contains(&asset_id)) {
+        return 0
+    };
+    item_balance::value(&inventory.balances[&asset_id])
 }
 
 // === Package Functions ===
@@ -127,71 +132,78 @@ public(package) fun create(max_capacity: u64): Inventory {
     Inventory {
         max_capacity,
         used_capacity: 0,
-        items: vec_map::empty(),
+        balances: vec_map::empty(),
+        slot_volumes: vec_map::empty(),
     }
 }
 
-/// Mints items into inventory (Game → Chain bridge)
-/// Admin-only function for trusted game server
-/// Creates new item or adds to existing if type_id already exists
-public(package) fun mint_items(
+/// Mints new balance into inventory (Game → Chain bridge).
+///
+/// Creates an `ItemBalance` and deposits it into the inventory.
+/// Capacity is checked using per-unit volume from `ItemRegistry`.
+public(package) fun mint(
     inventory: &mut Inventory,
+    item_registry: &ItemRegistry,
+    asset_id: ID,
+    quantity: u64,
     assembly_id: ID,
     assembly_key: TenantItemId,
     character: &Character,
-    tenant: String,
-    item_id: u64,
-    type_id: u64,
-    volume: u64,
-    quantity: u32,
-    location_hash: vector<u8>,
-    ctx: &mut TxContext,
 ) {
-    assert!(type_id != 0, ETypeIdEmpty);
+    assert_tenant_match(item_registry, asset_id, assembly_key);
 
-    if (inventory.items.contains(&type_id)) {
-        increase_item_quantity(inventory, assembly_id, assembly_key, character, type_id, quantity);
+    // Use locked-in volume if slot exists, otherwise lock in from registry
+    let unit_volume = if (inventory.slot_volumes.contains(&asset_id)) {
+        inventory.slot_volumes[&asset_id]
     } else {
-        let type_uid = object::new(ctx);
-        let item = Item {
-            id: type_uid,
-            tenant,
-            type_id,
-            item_id,
-            volume,
-            quantity,
-            location: location::attach(location_hash),
-        };
+        let vol = item_balance::volume(item_registry, asset_id);
+        inventory.slot_volumes.insert(asset_id, vol);
+        vol
+    };
 
-        let req_capacity = calculate_volume(volume, quantity);
-        let remaining_capacity = inventory.max_capacity - inventory.used_capacity;
-        assert!(req_capacity <= remaining_capacity, EInventoryInsufficientCapacity);
+    let req_capacity = unit_volume * quantity;
+    let remaining = inventory.max_capacity - inventory.used_capacity;
+    assert!(req_capacity <= remaining, EInventoryInsufficientCapacity);
 
-        inventory.used_capacity = inventory.used_capacity + req_capacity;
-        inventory.items.insert(type_id, item);
+    // Create fresh ItemBalance (supply tracked off-chain via events)
+    let balance = item_balance::increase_supply(item_registry, asset_id, quantity);
 
-        event::emit(ItemMintedEvent {
-            assembly_id,
-            assembly_key,
-            character_id: character.id(),
-            character_key: character.key(),
-            item_id,
-            type_id,
-            quantity,
-        });
-    }
+    // Join into existing slot or insert new
+    if (inventory.balances.contains(&asset_id)) {
+        let existing = &mut inventory.balances[&asset_id];
+        existing.join(balance);
+    } else {
+        inventory.balances.insert(asset_id, balance);
+    };
+
+    inventory.used_capacity = inventory.used_capacity + req_capacity;
+
+    event::emit(ItemMintedEvent {
+        assembly_id,
+        assembly_key,
+        character_id: character.id(),
+        character_key: character.key(),
+        asset_id,
+        type_id: lookup_type_id(item_registry, asset_id),
+        quantity,
+    });
 }
 
-public(package) fun burn_items_with_proof(
+/// Burns items from inventory with proximity proof (Chain → Game bridge).
+///
+/// Verifies the location proof, splits the balance out of the inventory,
+/// and destroys it.
+public(package) fun burn_with_proof(
     inventory: &mut Inventory,
+    item_registry: &ItemRegistry,
+    asset_id: ID,
+    quantity: u64,
     assembly_id: ID,
     assembly_key: TenantItemId,
     character: &Character,
     server_registry: &ServerAddressRegistry,
     location: &Location,
     location_proof: vector<u8>,
-    type_id: u64,
-    quantity: u32,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -202,20 +214,44 @@ public(package) fun burn_items_with_proof(
         clock,
         ctx,
     );
-    burn_items(inventory, assembly_id, assembly_key, character, type_id, quantity);
+    burn(inventory, item_registry, asset_id, quantity, assembly_id, assembly_key, character);
 }
 
-// A wrapper function to transfer between inventories
-public(package) fun deposit_item(
+/// Deposits an `ItemBalance` into inventory (transfer between inventories — no supply change).
+///
+/// Capacity is checked using per-unit volume from `ItemRegistry`.
+public(package) fun deposit(
     inventory: &mut Inventory,
+    item_registry: &ItemRegistry,
+    balance: ItemBalance,
     assembly_id: ID,
     assembly_key: TenantItemId,
     character: &Character,
-    item: Item,
 ) {
-    let req_capacity = calculate_volume(item.volume, item.quantity);
-    let remaining_capacity = inventory.max_capacity - inventory.used_capacity;
-    assert!(req_capacity <= remaining_capacity, EInventoryInsufficientCapacity);
+    let asset_id = balance.balance_asset_id();
+    let quantity = balance.value();
+    assert_tenant_match(item_registry, asset_id, assembly_key);
+
+    // Use locked-in volume if slot exists, otherwise lock in from registry
+    let unit_volume = if (inventory.slot_volumes.contains(&asset_id)) {
+        inventory.slot_volumes[&asset_id]
+    } else {
+        let vol = item_balance::volume(item_registry, asset_id);
+        inventory.slot_volumes.insert(asset_id, vol);
+        vol
+    };
+
+    let req_capacity = unit_volume * quantity;
+    let remaining = inventory.max_capacity - inventory.used_capacity;
+    assert!(req_capacity <= remaining, EInventoryInsufficientCapacity);
+
+    // Join into existing slot or insert new
+    if (inventory.balances.contains(&asset_id)) {
+        let existing = &mut inventory.balances[&asset_id];
+        existing.join(balance);
+    } else {
+        inventory.balances.insert(asset_id, balance);
+    };
 
     inventory.used_capacity = inventory.used_capacity + req_capacity;
 
@@ -224,172 +260,158 @@ public(package) fun deposit_item(
         assembly_key,
         character_id: character.id(),
         character_key: character.key(),
-        item_id: item.item_id,
-        type_id: item.type_id,
-        quantity: item.quantity,
+        asset_id,
+        type_id: lookup_type_id(item_registry, asset_id),
+        quantity,
     });
-    inventory.items.insert(item.type_id, item);
 }
 
-// A wrapper function to transfer between inventories
-/// Withdraws the item with the specified type_id and returns the whole Item.
-public(package) fun withdraw_item(
+/// Withdraws an `ItemBalance` from inventory (transfer between inventories — no supply change).
+///
+/// Splits the requested quantity from the inventory slot.  Removes the slot if fully drained.
+public(package) fun withdraw(
     inventory: &mut Inventory,
+    item_registry: &ItemRegistry,
+    asset_id: ID,
+    quantity: u64,
     assembly_id: ID,
     assembly_key: TenantItemId,
     character: &Character,
-    type_id: u64,
-): Item {
-    assert!(inventory.items.contains(&type_id), EItemDoesNotExist);
+): ItemBalance {
+    assert!(inventory.balances.contains(&asset_id), EItemDoesNotExist);
 
-    let (_, item) = inventory.items.remove(&type_id);
-    let volume_freed = calculate_volume(item.volume, item.quantity);
-    inventory.used_capacity = inventory.used_capacity - volume_freed;
+    let unit_volume = inventory.slot_volumes[&asset_id];
+
+    // Check if withdrawing entire balance
+    let full_withdraw = {
+        let bal = &inventory.balances[&asset_id];
+        bal.value() == quantity
+    };
+
+    let withdrawn = if (full_withdraw) {
+        let (_, balance) = inventory.balances.remove(&asset_id);
+        inventory.slot_volumes.remove(&asset_id);
+        balance
+    } else {
+        let balance = &mut inventory.balances[&asset_id];
+        assert!(balance.value() >= quantity, EInventoryInsufficientQuantity);
+        balance.split(quantity)
+    };
+
+    let freed_capacity = unit_volume * quantity;
+    inventory.used_capacity = inventory.used_capacity - freed_capacity;
 
     event::emit(ItemWithdrawnEvent {
         assembly_id,
         assembly_key,
         character_id: character.id(),
         character_key: character.key(),
-        item_id: item.item_id,
-        type_id: item.type_id,
-        quantity: item.quantity,
+        asset_id,
+        type_id: lookup_type_id(item_registry, asset_id),
+        quantity,
     });
-    item
+
+    withdrawn
 }
 
-public(package) fun delete(inventory: Inventory, assembly_id: ID, assembly_key: TenantItemId) {
+/// Destroys the inventory and burns all remaining balances.
+public(package) fun delete(
+    inventory: Inventory,
+    item_registry: &ItemRegistry,
+    assembly_id: ID,
+    assembly_key: TenantItemId,
+) {
     let Inventory {
-        mut items,
+        mut balances,
+        mut slot_volumes,
         ..,
     } = inventory;
 
-    // Burn the items one by one
-    while (!items.is_empty()) {
-        let (_, item) = items.pop();
-        let Item { id, item_id, type_id, quantity, location, .. } = item;
+    while (!balances.is_empty()) {
+        let (asset_id, balance) = balances.pop();
+        let quantity = balance.value();
 
-        event::emit(ItemDestroyedEvent {
+        event::emit(InventoryDestroyedEvent {
             assembly_id,
             assembly_key,
-            item_id,
-            type_id,
+            asset_id,
+            type_id: lookup_type_id(item_registry, asset_id),
             quantity,
         });
 
-        location.remove();
-        id.delete();
+        item_balance::decrease_supply(item_registry, balance);
     };
-    items.destroy_empty();
+    balances.destroy_empty();
+    // Clean up slot_volumes – entries may already have been removed during
+    // full withdrawals/burns, but any remaining are discarded here.
+    while (!slot_volumes.is_empty()) {
+        slot_volumes.pop();
+    };
+    slot_volumes.destroy_empty();
 }
 
 // FUTURE: transfer items between inventory, eg: inventory to inventory on-chain.
 // This needs location proof and distance to enforce digital physics.
-// public fun transfer_items() {}
 
 // === Private Functions ===
 
-/// Burns items from on-chain inventory (Chain → Game bridge)
-/// Emits ItemBurnedEvent for game server to create item in-game
-/// Deletes Item object if param quantity = existing quantity, otherwise reduces quantity
-fun burn_items(
+/// Looks up the game `type_id` for a registered asset.
+fun lookup_type_id(item_registry: &ItemRegistry, asset_id: ID): u64 {
+    in_game_id::type_id(&item_balance::item_data(item_registry, asset_id).data_key())
+}
+
+/// Asserts that the item's tenant matches the assembly's tenant.
+fun assert_tenant_match(item_registry: &ItemRegistry, asset_id: ID, assembly_key: TenantItemId) {
+    let item_tenant = in_game_id::type_tenant(&item_balance::item_data(item_registry, asset_id).data_key());
+    let assembly_tenant = in_game_id::tenant(&assembly_key);
+    assert!(item_tenant == assembly_tenant, ETenantMismatch);
+}
+
+/// Internal burn: splits balance from inventory and destroys it.
+fun burn(
     inventory: &mut Inventory,
+    item_registry: &ItemRegistry,
+    asset_id: ID,
+    quantity: u64,
     assembly_id: ID,
     assembly_key: TenantItemId,
     character: &Character,
-    type_id: u64,
-    quantity: u32,
 ) {
-    assert!(inventory.items.contains(&type_id), EItemDoesNotExist);
+    assert!(inventory.balances.contains(&asset_id), EItemDoesNotExist);
 
-    let should_remove = {
-        let item = &mut inventory.items[&type_id];
-        assert!(item.quantity >= quantity, EInventoryInsufficientQuantity);
+    let unit_volume = inventory.slot_volumes[&asset_id];
 
-        if (item.quantity == quantity) {
-            true
-        } else {
-            // Optimization: Handle partial burn here directly to avoid another lookup
-            let volume_freed = calculate_volume(item.volume, quantity);
-
-            item.quantity = item.quantity - quantity;
-            inventory.used_capacity = inventory.used_capacity - volume_freed;
-
-            event::emit(ItemBurnedEvent {
-                assembly_id,
-                assembly_key,
-                character_id: character.id(),
-                character_key: character.key(),
-                item_id: item.item_id,
-                type_id,
-                quantity: quantity,
-            });
-            false
-        }
+    // Check if burning entire balance
+    let full_burn = {
+        let bal = &inventory.balances[&asset_id];
+        assert!(bal.value() >= quantity, EInventoryInsufficientQuantity);
+        bal.value() == quantity
     };
 
-    if (should_remove) {
-        let (_, removed_item) = inventory.items.remove(&type_id);
-        let volume_freed = calculate_volume(removed_item.volume, removed_item.quantity);
-        inventory.used_capacity = inventory.used_capacity - volume_freed;
-
-        destroy_item(removed_item, character, assembly_id, assembly_key);
+    let burned = if (full_burn) {
+        let (_, balance) = inventory.balances.remove(&asset_id);
+        inventory.slot_volumes.remove(&asset_id);
+        balance
+    } else {
+        let balance = &mut inventory.balances[&asset_id];
+        balance.split(quantity)
     };
-}
 
-fun destroy_item(
-    item: Item,
-    character: &Character,
-    inventory_assembly_id: ID,
-    inventory_assembly_key: TenantItemId,
-) {
-    let Item { id, item_id, type_id, quantity, location, .. } = item;
+    let freed_capacity = unit_volume * quantity;
+    inventory.used_capacity = inventory.used_capacity - freed_capacity;
+
+    // Destroy the balance (supply tracked off-chain via events)
+    item_balance::decrease_supply(item_registry, burned);
 
     event::emit(ItemBurnedEvent {
-        assembly_id: inventory_assembly_id,
-        assembly_key: inventory_assembly_key,
-        character_id: character.id(),
-        character_key: character.key(),
-        item_id,
-        type_id,
-        quantity,
-    });
-
-    location.remove();
-    id.delete();
-}
-
-/// Increases the quantity value of an existing item in the specified inventory.
-fun increase_item_quantity(
-    inventory: &mut Inventory,
-    assembly_id: ID,
-    assembly_key: TenantItemId,
-    character: &Character,
-    type_id: u64,
-    quantity: u32,
-) {
-    let item = &mut inventory.items[&type_id];
-    let req_capacity = calculate_volume(item.volume, quantity);
-
-    let remaining_capacity = inventory.max_capacity - inventory.used_capacity;
-    assert!(req_capacity <= remaining_capacity, EInventoryInsufficientCapacity);
-
-    event::emit(ItemMintedEvent {
         assembly_id,
         assembly_key,
         character_id: character.id(),
         character_key: character.key(),
-        item_id: item.item_id,
-        type_id,
+        asset_id,
+        type_id: lookup_type_id(item_registry, asset_id),
         quantity,
     });
-
-    item.quantity = item.quantity + quantity;
-    inventory.used_capacity = inventory.used_capacity + req_capacity;
-}
-
-fun calculate_volume(volume: u64, quantity: u32): u64 {
-    volume * (quantity as u64)
 }
 
 // === Test Functions ===
@@ -404,45 +426,43 @@ public fun used_capacity(inventory: &Inventory): u64 {
 }
 
 #[test_only]
-public fun item_quantity(inventory: &Inventory, type_id: u64): u32 {
-    inventory.items[&type_id].quantity
-}
-
-#[test_only]
-public fun item_location(inventory: &Inventory, type_id: u64): vector<u8> {
-    let item = &inventory.items[&type_id];
-    location::hash(&item.location)
+public fun item_quantity(inventory: &Inventory, asset_id: ID): u64 {
+    if (!inventory.balances.contains(&asset_id)) {
+        return 0
+    };
+    item_balance::value(&inventory.balances[&asset_id])
 }
 
 #[test_only]
 public fun inventory_item_length(inventory: &Inventory): u64 {
-    inventory.items.length()
+    inventory.balances.length()
 }
 
 #[test_only]
 public fun burn_items_test(
     inventory: &mut Inventory,
+    item_registry: &ItemRegistry,
+    asset_id: ID,
+    quantity: u64,
     assembly_id: ID,
     assembly_key: TenantItemId,
     character: &Character,
-    type_id: u64,
-    quantity: u32,
 ) {
-    burn_items(inventory, assembly_id, assembly_key, character, type_id, quantity);
+    burn(inventory, item_registry, asset_id, quantity, assembly_id, assembly_key, character);
 }
 
-// Mocking without deadline
 #[test_only]
-public fun burn_items_with_proof_test(
+public fun burn_with_proof_test(
     inventory: &mut Inventory,
+    item_registry: &ItemRegistry,
+    asset_id: ID,
+    quantity: u64,
     assembly_id: ID,
     assembly_key: TenantItemId,
     character: &Character,
     server_registry: &ServerAddressRegistry,
     location: &Location,
     location_proof: vector<u8>,
-    type_id: u64,
-    quantity: u32,
     ctx: &mut TxContext,
 ) {
     location::verify_proximity_proof_from_bytes_without_deadline(
@@ -451,5 +471,5 @@ public fun burn_items_with_proof_test(
         location_proof,
         ctx,
     );
-    burn_items(inventory, assembly_id, assembly_key, character, type_id, quantity);
+    burn(inventory, item_registry, asset_id, quantity, assembly_id, assembly_key, character);
 }
