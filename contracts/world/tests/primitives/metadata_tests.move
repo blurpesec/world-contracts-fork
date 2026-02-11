@@ -118,7 +118,7 @@ fun create_assembly(ts: &mut ts::Scenario, nwn_id: ID, owner: address, item_id: 
     (assembly_id, character_id)
 }
 
-/// Borrows OwnerCap<Assembly> from character; caller must return it with character::return_owner_cap(owner_cap, receipt)
+/// Borrows OwnerCap<Assembly> from character; caller must return it with character.return_owner_cap(owner_cap, receipt)
 fun borrow_assembly_owner_cap(
     character: &mut Character,
     ts: &mut ts::Scenario,

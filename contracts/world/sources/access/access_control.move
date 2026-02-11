@@ -34,11 +34,6 @@ public struct ReturnOwnerCapReceipt {
     owner_cap_id: ID,
 }
 
-/// Creates a return receipt. Consumed by return_owner_cap_to_object or transfer_owner_cap_with_receipt.
-public fun create_return_receipt(owner_id: address, owner_cap_id: ID): ReturnOwnerCapReceipt {
-    ReturnOwnerCapReceipt { owner_id, owner_cap_id }
-}
-
 public struct AdminACL has key {
     id: UID,
     authorized_sponsors: Table<address, bool>,
@@ -191,6 +186,14 @@ public(package) fun receive_owner_cap<T: key>(
     ticket: Receiving<OwnerCap<T>>,
 ): OwnerCap<T> {
     transfer::receive(receiving_id, ticket)
+}
+
+/// Creates a return receipt. Consumed by return_owner_cap_to_object or transfer_owner_cap_with_receipt.
+public(package) fun create_return_receipt(
+    owner_id: address,
+    owner_cap_id: ID,
+): ReturnOwnerCapReceipt {
+    ReturnOwnerCapReceipt { owner_id, owner_cap_id }
 }
 
 // === Admin Functions ===

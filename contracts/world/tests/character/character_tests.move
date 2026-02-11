@@ -642,7 +642,7 @@ fun update_tribe_without_admin_cap() {
 
 /// Tests that returning an owner cap to a different character than it was borrowed from fails.
 /// Scenario: Borrow from character A, then try to return to character B using the same receipt.
-/// Expected: Transaction aborts with ECharacterIdMismatch.
+/// Expected: Transaction aborts with EOwnerIdMismatch.
 #[test]
 #[expected_failure(abort_code = access::EOwnerIdMismatch)]
 fun return_owner_cap_to_different_character_fails() {
