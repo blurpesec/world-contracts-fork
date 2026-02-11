@@ -2,6 +2,7 @@
 /// Basic operations are anchor, unanchor, online, offline and destroy
 module world::assembly;
 
+use std::string::String;
 use sui::{derived_object, event};
 use world::{
     access::{Self, AdminCap, OwnerCap},
@@ -101,6 +102,11 @@ public fun status(assembly: &Assembly): &AssemblyStatus {
 
 public fun owner_cap_id(assembly: &Assembly): ID {
     assembly.owner_cap_id
+}
+
+/// Returns the assembly's tenant string.
+public fun tenant(assembly: &Assembly): String {
+    in_game_id::tenant(&assembly.key)
 }
 
 /// Returns the assembly's energy source (network node) ID if set

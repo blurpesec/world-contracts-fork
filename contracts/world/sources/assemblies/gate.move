@@ -14,7 +14,7 @@
 /// Extension pattern: https://github.com/evefrontier/world-contracts/blob/main/docs/architechture.md#layer-3-player-extensions-moddability
 module world::gate;
 
-use std::{bcs, type_name::{Self, TypeName}};
+use std::{bcs, string::String, type_name::{Self, TypeName}};
 use sui::{clock::Clock, derived_object, event, hash, table::{Self, Table}};
 use world::{
     access::{Self, OwnerCap, AdminCap, ServerAddressRegistry, AdminACL},
@@ -380,6 +380,11 @@ public fun linked_gate_id(gate: &Gate): Option<ID> {
 
 public fun owner_cap_id(gate: &Gate): ID {
     gate.owner_cap_id
+}
+
+/// Returns the gate's tenant string.
+public fun tenant(gate: &Gate): String {
+    in_game_id::tenant(&gate.key)
 }
 
 /// Returns the gate's energy source (network node) ID if set

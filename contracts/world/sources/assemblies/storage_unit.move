@@ -20,7 +20,7 @@
 /// Future pattern: Storage Units (extension-controlled), Ships (owner-controlled)
 module world::storage_unit;
 
-use std::type_name::{Self, TypeName};
+use std::{string::String, type_name::{Self, TypeName}};
 use sui::{clock::Clock, derived_object, dynamic_field as df, event};
 use world::{
     access::{Self, OwnerCap, AdminCap, ServerAddressRegistry, AdminACL},
@@ -333,6 +333,11 @@ public fun inventory(storage_unit: &StorageUnit, owner_cap_id: ID): &Inventory {
 
 public fun owner_cap_id(storage_unit: &StorageUnit): ID {
     storage_unit.owner_cap_id
+}
+
+/// Returns the storage unit's tenant string.
+public fun tenant(storage_unit: &StorageUnit): String {
+    in_game_id::tenant(&storage_unit.key)
 }
 
 /// Returns the storage unit's energy source (network node) ID if set
