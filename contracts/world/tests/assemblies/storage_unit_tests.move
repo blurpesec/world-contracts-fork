@@ -12,7 +12,7 @@ use world::{
     item_balance::{Self, ItemBalance, ItemRegistry},
     network_node::{Self, NetworkNode},
     object_registry::ObjectRegistry,
-    storage_unit::{Self, StorageUnit},
+    storage_unit::{Self, StorageUnit, BoundBalance},
     test_helpers::{Self, governor, admin, user_a, user_b, tenant}
 };
 
@@ -65,7 +65,7 @@ public fun swap_ammo_for_lens_extension<T: key>(
     ctx: &mut TxContext,
 ) {
     // Step 1: withdraws lens from storage unit (extension access)
-    let lens = storage_unit.withdraw_item<SwapAuth>(
+    let lens_bound = storage_unit.withdraw_item<SwapAuth>(
         item_registry,
         character,
         SwapAuth {},
@@ -73,6 +73,9 @@ public fun swap_ammo_for_lens_extension<T: key>(
         LENS_QUANTITY,
         ctx,
     );
+
+    // Unwrap BoundBalance for owner deposit (verifies same storage unit)
+    let lens = storage_unit.unwrap_bound_balance(lens_bound);
 
     // Step 2: deposits lens to ephemeral storage (owner access)
     storage_unit.deposit_by_owner(
@@ -99,11 +102,14 @@ public fun swap_ammo_for_lens_extension<T: key>(
         ctx,
     );
 
+    // Wrap ItemBalance for extension deposit (binds to this storage unit)
+    let ammo_bound = storage_unit.wrap_to_bound_balance(ammo);
+
     // Step 4: deposits the item from Step 3 to storage unit (extension access)
     storage_unit.deposit_item<SwapAuth>(
         item_registry,
         character,
-        ammo,
+        ammo_bound,
         SwapAuth {},
         ctx,
     );
@@ -722,12 +728,12 @@ fun test_deposit_and_withdraw_via_extension() {
     };
 
     ts::next_tx(&mut ts, user_a());
-    let balance: ItemBalance;
+    let bound_balance: BoundBalance;
     {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let item_registry = ts::take_shared<ItemRegistry>(&ts);
-        balance =
+        bound_balance =
             storage_unit.withdraw_item<SwapAuth>(
                 &item_registry,
                 &character,
@@ -749,7 +755,7 @@ fun test_deposit_and_withdraw_via_extension() {
         storage_unit.deposit_item<SwapAuth>(
             &item_registry,
             &character,
-            balance,
+            bound_balance,
             SwapAuth {},
             ts.ctx(),
         );
@@ -1138,7 +1144,7 @@ fun test_withdraw_via_extension_fail_not_authorized() {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let item_registry = ts::take_shared<ItemRegistry>(&ts);
-        let balance = storage_unit.withdraw_item<SwapAuth>(
+        let bound_balance = storage_unit.withdraw_item<SwapAuth>(
             &item_registry,
             &character,
             SwapAuth {},
@@ -1150,7 +1156,7 @@ fun test_withdraw_via_extension_fail_not_authorized() {
         storage_unit.deposit_item<SwapAuth>(
             &item_registry,
             &character,
-            balance,
+            bound_balance,
             SwapAuth {},
             ts.ctx(),
         );
@@ -1225,10 +1231,12 @@ fun test_deposit_via_extension_fail_not_authorized() {
     ts::next_tx(&mut ts, user_a());
     {
         let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        // Wrap ItemBalance to BoundBalance for extension deposit
+        let bound = storage_unit.wrap_to_bound_balance(balance);
         storage_unit.deposit_item<SwapAuth>(
             &item_registry,
             &character,
-            balance,
+            bound,
             SwapAuth {},
             ts.ctx(),
         );
@@ -1981,10 +1989,12 @@ fun test_deposit_via_extension_fail_tenant_mismatch() {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_a_id);
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        // Wrap for the target storage unit
+        let bound = storage_unit.wrap_to_bound_balance(balance);
         storage_unit.deposit_item<SwapAuth>(
             &item_registry,
             &character,
-            balance,
+            bound,
             SwapAuth {},
             ts.ctx(),
         );

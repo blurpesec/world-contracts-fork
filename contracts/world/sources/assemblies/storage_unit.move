@@ -61,6 +61,9 @@ const ENetworkNodeMismatch: vector<u8> =
 const EStorageUnitInvalidState: vector<u8> = b"Storage Unit should be offline";
 #[error(code = 10)]
 const ESenderCannotAccessCharacter: vector<u8> = b"Address cannot access Character";
+#[error(code = 11)]
+const EBoundBalanceMismatch: vector<u8> =
+    b"BoundBalance can only be deposited into its origin storage unit";
 
 // Future thought: Can we make the behaviour attached dynamically using dof
 // === Structs ===
@@ -75,6 +78,15 @@ public struct StorageUnit has key {
     energy_source_id: Option<ID>,
     metadata: Option<Metadata>,
     extension: Option<TypeName>,
+}
+
+/// A balance bound to a specific storage unit.
+/// Enforces "digital physics" by ensuring items withdrawn via extensions
+/// can only be deposited back into the same storage unit.
+/// For cross-assembly transfers, use `transfer_item` which requires proximity proof.
+public struct BoundBalance has store {
+    storage_unit_id: ID,
+    balance: ItemBalance,
 }
 
 // === Events ===
@@ -175,12 +187,14 @@ public fun chain_item_to_game_inventory<T: key>(
     );
 }
 
-/// Deposits an `ItemBalance` into storage via an extension contract.
+/// Deposits a `BoundBalance` into storage via an extension contract.
+/// The balance must have been withdrawn from this same storage unit.
+/// For cross-assembly transfers, use `transfer_item` which requires proximity proof.
 public fun deposit_item<Auth: drop>(
     storage_unit: &mut StorageUnit,
     item_registry: &ItemRegistry,
     character: &Character,
-    balance: ItemBalance,
+    bound: BoundBalance,
     _: Auth,
     _: &mut TxContext,
 ) {
@@ -190,6 +204,9 @@ public fun deposit_item<Auth: drop>(
         EExtensionNotAuthorized,
     );
     assert!(storage_unit.status.is_online(), ENotOnline);
+    assert!(bound.storage_unit_id == storage_unit_id, EBoundBalanceMismatch);
+
+    let BoundBalance { storage_unit_id: _, balance } = bound;
 
     let inventory = df::borrow_mut<ID, Inventory>(
         &mut storage_unit.id,
@@ -204,7 +221,9 @@ public fun deposit_item<Auth: drop>(
     );
 }
 
-/// Withdraws an `ItemBalance` from storage via an extension contract.
+/// Withdraws items from storage via an extension contract.
+/// Returns a `BoundBalance` that can only be deposited back into this same storage unit.
+/// For cross-assembly transfers, use `transfer_item` which requires proximity proof.
 public fun withdraw_item<Auth: drop>(
     storage_unit: &mut StorageUnit,
     item_registry: &ItemRegistry,
@@ -213,7 +232,7 @@ public fun withdraw_item<Auth: drop>(
     asset_id: ID,
     quantity: u64,
     _: &mut TxContext,
-): ItemBalance {
+): BoundBalance {
     let storage_unit_id = object::id(storage_unit);
     assert!(
         storage_unit.extension.contains(&type_name::with_defining_ids<Auth>()),
@@ -224,14 +243,89 @@ public fun withdraw_item<Auth: drop>(
         storage_unit.owner_cap_id,
     );
 
-    inventory.withdraw(
+    let balance = inventory.withdraw(
         item_registry,
         asset_id,
         quantity,
         storage_unit_id,
         storage_unit.key,
         character,
-    )
+    );
+
+    BoundBalance {
+        storage_unit_id,
+        balance,
+    }
+}
+
+/// Transfers items between two storage units via an extension contract.
+/// Enforces digital physics by requiring both storage units to be at the same location.
+/// Both storage units must have the extension authorized.
+public fun transfer_item<Auth: drop>(
+    source: &mut StorageUnit,
+    target: &mut StorageUnit,
+    item_registry: &ItemRegistry,
+    server_registry: &ServerAddressRegistry,
+    character: &Character,
+    _: Auth,
+    asset_id: ID,
+    quantity: u64,
+    proximity_proof: vector<u8>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let source_id = object::id(source);
+    let target_id = object::id(target);
+
+    // Verify extension is authorized on both storage units
+    assert!(
+        source.extension.contains(&type_name::with_defining_ids<Auth>()),
+        EExtensionNotAuthorized,
+    );
+    assert!(
+        target.extension.contains(&type_name::with_defining_ids<Auth>()),
+        EExtensionNotAuthorized,
+    );
+
+    // Verify both are online
+    assert!(source.status.is_online(), ENotOnline);
+    assert!(target.status.is_online(), ENotOnline);
+
+    // Verify proximity between source and target locations
+    location::verify_proximity_proof_from_bytes(
+        server_registry,
+        &source.location,
+        proximity_proof,
+        clock,
+        ctx,
+    );
+
+    // Withdraw from source
+    let source_inventory = df::borrow_mut<ID, Inventory>(
+        &mut source.id,
+        source.owner_cap_id,
+    );
+    let balance = source_inventory.withdraw(
+        item_registry,
+        asset_id,
+        quantity,
+        source_id,
+        source.key,
+        character,
+    );
+
+    // Deposit into target
+    let target_inventory = df::borrow_mut<ID, Inventory>(
+        &mut target.id,
+        target.owner_cap_id,
+    );
+    target_inventory.deposit(
+        item_registry,
+        balance,
+        target_id,
+        target.key,
+        character,
+    );
 }
 
 /// Deposits an `ItemBalance` via owner direct access with proximity proof.
@@ -316,7 +410,31 @@ public fun withdraw_by_owner<T: key>(
     )
 }
 
-// TODO: Can also have a transfer function for simplicity
+/// Unwrap a BoundBalance into an ItemBalance for owner-based deposit.
+/// Verifies the bound storage_unit_id matches the target storage unit.
+/// Use this when you need to convert from extension withdrawal to owner deposit.
+public fun unwrap_bound_balance(
+    storage_unit: &StorageUnit,
+    bound: BoundBalance,
+): ItemBalance {
+    let storage_unit_id = object::id(storage_unit);
+    assert!(bound.storage_unit_id == storage_unit_id, EBoundBalanceMismatch);
+    let BoundBalance { storage_unit_id: _, balance } = bound;
+    balance
+}
+
+/// Wrap an ItemBalance into a BoundBalance for extension-based deposit.
+/// Use this when converting from owner withdrawal to extension deposit.
+/// The balance becomes bound to this storage unit.
+public fun wrap_to_bound_balance(
+    storage_unit: &StorageUnit,
+    balance: ItemBalance,
+): BoundBalance {
+    BoundBalance {
+        storage_unit_id: object::id(storage_unit),
+        balance,
+    }
+}
 
 // === View Functions ===
 public fun status(storage_unit: &StorageUnit): &AssemblyStatus {
@@ -343,6 +461,28 @@ public fun tenant(storage_unit: &StorageUnit): String {
 /// Returns the storage unit's energy source (network node) ID if set
 public fun energy_source_id(storage_unit: &StorageUnit): &Option<ID> {
     &storage_unit.energy_source_id
+}
+
+// === BoundBalance View Functions ===
+
+/// Returns the storage unit ID this balance is bound to.
+public fun bound_storage_unit_id(bound: &BoundBalance): ID {
+    bound.storage_unit_id
+}
+
+/// Returns an immutable reference to the inner balance.
+public fun bound_balance(bound: &BoundBalance): &ItemBalance {
+    &bound.balance
+}
+
+/// Returns the value (quantity) of the bound balance.
+public fun bound_value(bound: &BoundBalance): u64 {
+    bound.balance.value()
+}
+
+/// Returns the asset ID of the bound balance.
+public fun bound_asset_id(bound: &BoundBalance): ID {
+    bound.balance.balance_asset_id()
 }
 
 // === Admin Functions ===
@@ -732,6 +872,25 @@ public fun inventory_keys(storage_unit: &StorageUnit): vector<ID> {
 #[test_only]
 public fun has_inventory(storage_unit: &StorageUnit, owner_cap_id: ID): bool {
     df::exists_(&storage_unit.id, owner_cap_id)
+}
+
+#[test_only]
+/// Creates a BoundBalance for testing purposes.
+public fun test_create_bound_balance(
+    storage_unit_id: ID,
+    balance: ItemBalance,
+): BoundBalance {
+    BoundBalance {
+        storage_unit_id,
+        balance,
+    }
+}
+
+#[test_only]
+/// Unwraps a BoundBalance and returns the inner ItemBalance for testing.
+public fun test_unwrap_bound_balance(bound: BoundBalance): ItemBalance {
+    let BoundBalance { storage_unit_id: _, balance } = bound;
+    balance
 }
 
 #[test_only]
