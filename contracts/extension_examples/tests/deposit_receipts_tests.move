@@ -9,9 +9,7 @@ use extension_examples::deposit_receipts::{
 };
 use std::unit_test::assert_eq;
 use sui::clock;
-use sui::object;
 use sui::test_scenario as ts;
-use sui::transfer;
 use world::access::{Self as access, AdminCap, OwnerCap};
 use world::character::{Self as character, Character};
 use world::energy::EnergyConfig;
@@ -152,6 +150,256 @@ fun transfer_then_redeem() {
 }
 
 #[test]
+fun batch_lock_and_batch_redeem_multiple_assets() {
+    let mut ts = ts::begin(governor());
+    let (
+        vault_id,
+        storage_unit_id,
+        character_a_id,
+        _character_b_id,
+        asset_id,
+        fuel_asset_id,
+        nwn_id,
+    ) = setup_environment(&mut ts);
+
+    bring_online(&mut ts, character_a_id, nwn_id, storage_unit_id, fuel_asset_id);
+    authorize_extension(&mut ts, character_a_id, storage_unit_id);
+
+    owner_mint_into_storage(&mut ts, character_a_id, storage_unit_id, asset_id, DEPOSIT_QTY);
+    owner_mint_into_storage(&mut ts, character_a_id, storage_unit_id, fuel_asset_id, 2);
+
+    // Batch lock two different assets.
+    let ammo_receipt_id;
+    let fuel_receipt_id;
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut vault = ts::take_shared_by_id<Vault>(&mut ts, vault_id);
+        let mut su = ts::take_shared_by_id<StorageUnit>(&mut ts, storage_unit_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&mut ts);
+        let mut character_a = ts::take_shared_by_id<Character>(&mut ts, character_a_id);
+        let owner_cap = character_a.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
+            ts.ctx(),
+        );
+
+        let mut asset_ids_vec = vector::empty<ID>();
+        vector::push_back(&mut asset_ids_vec, asset_id);
+        vector::push_back(&mut asset_ids_vec, fuel_asset_id);
+
+        let mut qty_vec = vector::empty<u64>();
+        vector::push_back(&mut qty_vec, DEPOSIT_QTY);
+        vector::push_back(&mut qty_vec, 2);
+
+        let mut receipts = deposit_receipts::batch_lock(
+            &mut vault,
+            &mut su,
+            &item_registry,
+            &character_a,
+            &owner_cap,
+            asset_ids_vec,
+            qty_vec,
+            deposit_receipts::auth(),
+            ts.ctx(),
+        );
+
+        let r_fuel = vector::pop_back(&mut receipts);
+        let r_ammo = vector::pop_back(&mut receipts);
+        ammo_receipt_id = object::id(&r_ammo);
+        fuel_receipt_id = object::id(&r_fuel);
+
+        transfer::public_transfer(r_ammo, user_a());
+        transfer::public_transfer(r_fuel, user_a());
+
+        vector::destroy_empty(receipts);
+
+        character_a.return_owner_cap(owner_cap);
+        ts::return_shared(character_a);
+        ts::return_shared(item_registry);
+        ts::return_shared(su);
+        ts::return_shared(vault);
+    };
+
+    // Validate escrow quantities for both receipts.
+    ts::next_tx(&mut ts, user_a());
+    {
+        let vault = ts::take_shared_by_id<Vault>(&mut ts, vault_id);
+        assert_eq!(deposit_receipts::escrow_quantity(&vault, ammo_receipt_id), DEPOSIT_QTY);
+        assert_eq!(deposit_receipts::escrow_quantity(&vault, fuel_receipt_id), 2);
+        ts::return_shared(vault);
+    };
+
+    // Batch redeem and tally returned balances.
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut vault = ts::take_shared_by_id<Vault>(&mut ts, vault_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&mut ts);
+
+        let mut receipts_vec = vector::empty<DepositReceipt>();
+        let receipt_a = ts::take_from_sender<DepositReceipt>(&mut ts);
+        let receipt_b = ts::take_from_sender<DepositReceipt>(&mut ts);
+        vector::push_back(&mut receipts_vec, receipt_a);
+        vector::push_back(&mut receipts_vec, receipt_b);
+
+        let mut redeemed = deposit_receipts::batch_redeem(
+            &mut vault,
+            receipts_vec,
+            deposit_receipts::auth(),
+            ts.ctx(),
+        );
+
+        let mut total_ammo = 0;
+        let mut total_fuel = 0;
+        while (vector::length(&redeemed) > 0) {
+            let bal = vector::pop_back(&mut redeemed);
+            let asset = item_balance::balance_asset_id(&bal);
+            let qty = item_balance::value(&bal);
+            if (asset == asset_id) {
+                total_ammo = total_ammo + qty;
+            } else if (asset == fuel_asset_id) {
+                total_fuel = total_fuel + qty;
+            };
+            let _ = item_balance::test_decrease_supply(&item_registry, bal);
+        };
+
+        vector::destroy_empty(redeemed);
+
+        assert_eq!(total_ammo, DEPOSIT_QTY);
+        assert_eq!(total_fuel, 2);
+
+        ts::return_shared(item_registry);
+        ts::return_shared(vault);
+    };
+
+    // Ensure escrow cleared for both receipts.
+    ts::next_tx(&mut ts, user_a());
+    {
+        let vault = ts::take_shared_by_id<Vault>(&mut ts, vault_id);
+        assert_eq!(deposit_receipts::escrow_quantity(&vault, ammo_receipt_id), 0);
+        assert_eq!(deposit_receipts::escrow_quantity(&vault, fuel_receipt_id), 0);
+        ts::return_shared(vault);
+    };
+
+    ts::end(ts);
+}
+
+#[test]
+fun split_and_merge_receipts_preserves_escrow() {
+    let mut ts = ts::begin(governor());
+    let (
+        vault_id,
+        storage_unit_id,
+        character_a_id,
+        _character_b_id,
+        asset_id,
+        fuel_asset_id,
+        nwn_id,
+    ) = setup_environment(&mut ts);
+
+    bring_online(&mut ts, character_a_id, nwn_id, storage_unit_id, fuel_asset_id);
+    authorize_extension(&mut ts, character_a_id, storage_unit_id);
+
+    owner_mint_into_storage(&mut ts, character_a_id, storage_unit_id, asset_id, DEPOSIT_QTY);
+
+    let receipt_id = lock_items(
+        &mut ts,
+        vault_id,
+        storage_unit_id,
+        character_a_id,
+        asset_id,
+        DEPOSIT_QTY,
+    );
+
+    // Split the receipt into two parts.
+    let split_receipt_id;
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut vault = ts::take_shared_by_id<Vault>(&mut ts, vault_id);
+        let mut receipt = ts::take_from_sender<DepositReceipt>(&mut ts);
+
+        let new_receipt = deposit_receipts::split_receipt(
+            &mut vault,
+            &mut receipt,
+            2,
+            ts.ctx(),
+        );
+        split_receipt_id = object::id(&new_receipt);
+
+        assert_eq!(deposit_receipts::escrow_quantity(&vault, receipt_id), DEPOSIT_QTY - 2);
+        assert_eq!(deposit_receipts::escrow_quantity(&vault, split_receipt_id), 2);
+
+        transfer::public_transfer(receipt, user_a());
+        transfer::public_transfer(new_receipt, user_a());
+
+        ts::return_shared(vault);
+    };
+
+    // Merge them back and confirm escrow total is restored.
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut vault = ts::take_shared_by_id<Vault>(&mut ts, vault_id);
+        let r1 = ts::take_from_sender<DepositReceipt>(&mut ts);
+        let r2 = ts::take_from_sender<DepositReceipt>(&mut ts);
+
+        let (mut target, source) = if (object::id(&r1) == split_receipt_id) {
+            (r2, r1)
+        } else {
+            (r1, r2)
+        };
+
+        let combined = deposit_receipts::merge_receipts(&mut vault, &mut target, source);
+        assert_eq!(combined, DEPOSIT_QTY);
+        assert_eq!(deposit_receipts::escrow_quantity(&vault, object::id(&target)), DEPOSIT_QTY);
+        assert_eq!(deposit_receipts::escrow_quantity(&vault, split_receipt_id), 0);
+
+        transfer::public_transfer(target, user_a());
+        ts::return_shared(vault);
+    };
+
+    ts::end(ts);
+}
+
+#[test]
+fun receipt_metadata_passthrough() {
+    let mut ts = ts::begin(governor());
+    let (
+        vault_id,
+        storage_unit_id,
+        character_a_id,
+        _character_b_id,
+        asset_id,
+        fuel_asset_id,
+        nwn_id,
+    ) = setup_environment(&mut ts);
+
+    bring_online(&mut ts, character_a_id, nwn_id, storage_unit_id, fuel_asset_id);
+    authorize_extension(&mut ts, character_a_id, storage_unit_id);
+    owner_mint_into_storage(&mut ts, character_a_id, storage_unit_id, asset_id, DEPOSIT_QTY);
+
+    let _receipt_id = lock_items(
+        &mut ts,
+        vault_id,
+        storage_unit_id,
+        character_a_id,
+        asset_id,
+        DEPOSIT_QTY,
+    );
+
+    ts::next_tx(&mut ts, user_a());
+    {
+        let item_registry = ts::take_shared<ItemRegistry>(&mut ts);
+        let receipt = ts::take_from_sender<DepositReceipt>(&mut ts);
+        let name = deposit_receipts::receipt_item_name(&item_registry, &receipt);
+        let url = deposit_receipts::receipt_item_url(&item_registry, &receipt);
+        assert!(name == b"Ammo".to_string());
+        assert!(url == b"".to_string());
+        transfer::public_transfer(receipt, user_a());
+        ts::return_shared(item_registry);
+    };
+
+    ts::end(ts);
+}
+
+#[test]
 fun nonowner_lock_and_redeem() {
     let mut ts = ts::begin(governor());
     let (
@@ -168,24 +416,10 @@ fun nonowner_lock_and_redeem() {
     bring_online(&mut ts, character_a_id, nwn_id, storage_unit_id, fuel_asset_id);
     authorize_extension(&mut ts, character_a_id, storage_unit_id);
 
-    // Transfer the storage unit OwnerCap from character A to character B so B can operate it.
-    ts::next_tx(&mut ts, user_a());
-    {
-        let mut character_a = ts::take_shared_by_id<Character>(&mut ts, character_a_id);
-        let character_b = ts::take_shared_by_id<Character>(&mut ts, character_b_id);
-        let owner_cap = character_a.borrow_owner_cap<StorageUnit>(
-            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
-            ts.ctx(),
-        );
-        access::transfer_owner_cap<StorageUnit>(owner_cap, object::id_address(&character_b));
-        ts::return_shared(character_b);
-        ts::return_shared(character_a);
-    };
-
     // Mint ammo into the storage unit using character B (now holding the OwnerCap).
     nonowner_mint_into_storage(&mut ts, character_b_id, storage_unit_id, asset_id, DEPOSIT_QTY);
 
-    // User B locks items using their own character and the transferred OwnerCap, then keeps the receipt.
+    // User B locks items using their own character's OwnerCap (non-owner inventory), then keeps the receipt.
     ts::next_tx(&mut ts, user_b());
     let receipt_id;
     {
@@ -193,8 +427,8 @@ fun nonowner_lock_and_redeem() {
         let mut su = ts::take_shared_by_id<StorageUnit>(&mut ts, storage_unit_id);
         let item_registry = ts::take_shared<ItemRegistry>(&mut ts);
         let mut character_b = ts::take_shared_by_id<Character>(&mut ts, character_b_id);
-        let owner_cap = character_b.borrow_owner_cap<StorageUnit>(
-            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_b_id),
+        let owner_cap = character_b.borrow_owner_cap<Character>(
+            ts::most_recent_receiving_ticket<OwnerCap<Character>>(&character_b_id),
             ts.ctx(),
         );
 
@@ -312,7 +546,7 @@ fun lock_rejects_wrong_sender() {
 
 #[test]
 #[expected_failure]
-fun withdraw_after_lock_fails() {
+fun withdraw_after_lock_fails_on_double_spend() {
     let mut ts = ts::begin(governor());
     let (
         vault_id,
@@ -617,11 +851,11 @@ fun nonowner_mint_into_storage(
         let mut su = ts::take_shared_by_id<StorageUnit>(ts, storage_unit_id);
         let mut character_b = ts::take_shared_by_id<Character>(ts, character_b_id);
         let item_registry = ts::take_shared<ItemRegistry>(ts);
-        let owner_cap = character_b.borrow_owner_cap<StorageUnit>(
-            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_b_id),
+        let owner_cap = character_b.borrow_owner_cap<Character>(
+            ts::most_recent_receiving_ticket<OwnerCap<Character>>(&character_b_id),
             ts.ctx(),
         );
-        su.game_item_to_chain_inventory_test<StorageUnit>(
+        su.game_item_to_chain_inventory_test<Character>(
             &item_registry,
             &character_b,
             &owner_cap,

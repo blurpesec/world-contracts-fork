@@ -234,6 +234,43 @@ public fun withdraw_item<Auth: drop>(
     )
 }
 
+/// Withdraws an `ItemBalance` from a specific inventory (by owner_cap_id) via an extension contract.
+/// This supports withdrawing from character-specific inventories when using OwnerCap<Character>.
+public fun withdraw_item_by_cap<T: key, Auth: drop>(
+    storage_unit: &mut StorageUnit,
+    item_registry: &ItemRegistry,
+    character: &Character,
+    owner_cap: &OwnerCap<T>,
+    _: Auth,
+    asset_id: ID,
+    quantity: u64,
+    ctx: &mut TxContext,
+): ItemBalance {
+    let storage_unit_id = object::id(storage_unit);
+    let owner_cap_id = object::id(owner_cap);
+    assert!(
+        storage_unit.extension.contains(&type_name::with_defining_ids<Auth>()),
+        EExtensionNotAuthorized,
+    );
+    assert!(storage_unit.status.is_online(), ENotOnline);
+    assert!(character.character_address() == ctx.sender(), ESenderCannotAccessCharacter);
+    check_inventory_authorization(owner_cap, storage_unit, character.id());
+
+    let inventory = df::borrow_mut<ID, Inventory>(
+        &mut storage_unit.id,
+        owner_cap_id,
+    );
+
+    inventory.withdraw(
+        item_registry,
+        asset_id,
+        quantity,
+        storage_unit_id,
+        storage_unit.key,
+        character,
+    )
+}
+
 /// Deposits an `ItemBalance` via owner direct access with proximity proof.
 public fun deposit_by_owner<T: key>(
     storage_unit: &mut StorageUnit,
