@@ -761,6 +761,435 @@ fun test_deposit_and_withdraw_via_extension() {
     ts::end(ts);
 }
 
+/// Test withdrawing items via extension using withdraw_item_by_cap with OwnerCap<StorageUnit>
+/// Scenario: Authorize extension, withdraw item using withdraw_item_by_cap with storage unit owner cap
+/// Expected: Items can be withdrawn successfully via extension with owner cap
+#[test]
+fun test_withdraw_item_by_cap_with_storage_unit_owner_cap() {
+    let mut ts = ts::begin(governor());
+    setup_nwn(&mut ts);
+    let fuel_asset_id = test_helpers::register_fuel_item(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
+    let character_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
+
+    let (storage_id, nwn_id) = create_storage_unit(
+        &mut ts,
+        character_id,
+        LOCATION_A_HASH,
+        STORAGE_A_ITEM_ID,
+        STORAGE_A_TYPE_ID,
+    );
+    let owner_cap_id = storage_owner_cap_id(&mut ts, storage_id);
+    online_storage_unit(&mut ts, user_a(), character_id, storage_id, nwn_id, fuel_asset_id);
+    mint_ammo<StorageUnit>(&mut ts, storage_id, character_id, user_a(), ammo_asset_id);
+
+    // Authorize extension
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let owner_cap = character.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id),
+            ts.ctx(),
+        );
+        storage_unit.authorize_extension<SwapAuth>(&owner_cap);
+        ts::return_shared(storage_unit);
+        character.return_owner_cap(owner_cap);
+        ts::return_shared(character);
+    };
+
+    // Withdraw using withdraw_item_by_cap
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        let owner_cap = character.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id),
+            ts.ctx(),
+        );
+
+        let balance = storage_unit.withdraw_item_by_cap<StorageUnit, SwapAuth>(
+            &item_registry,
+            &character,
+            &owner_cap,
+            SwapAuth {},
+            ammo_asset_id,
+            AMMO_QUANTITY,
+            ts.ctx(),
+        );
+
+        assert_eq!(item_balance::value(&balance), AMMO_QUANTITY);
+        assert_eq!(item_balance::balance_asset_id(&balance), ammo_asset_id);
+
+        // Verify inventory is empty
+        assert_eq!(storage_unit.item_quantity(owner_cap_id, ammo_asset_id), 0);
+
+        // Deposit it back
+        storage_unit.deposit_item<SwapAuth>(
+            &item_registry,
+            &character,
+            balance,
+            SwapAuth {},
+            ts.ctx(),
+        );
+
+        assert_eq!(storage_unit.item_quantity(owner_cap_id, ammo_asset_id), AMMO_QUANTITY);
+
+        character.return_owner_cap(owner_cap);
+        ts::return_shared(item_registry);
+        ts::return_shared(storage_unit);
+        ts::return_shared(character);
+    };
+    ts::end(ts);
+}
+
+/// Test withdrawing items via extension using withdraw_item_by_cap with OwnerCap<Character>
+/// Scenario: Non-owner mints items in ephemeral inventory, then withdraws using withdraw_item_by_cap
+/// Expected: Items can be withdrawn from character-specific inventory via extension
+#[test]
+fun test_withdraw_item_by_cap_with_character_owner_cap() {
+    let mut ts = ts::begin(governor());
+    setup_nwn(&mut ts);
+    let fuel_asset_id = test_helpers::register_fuel_item(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
+    let character_a_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
+    let character_b_id = create_character(&mut ts, user_b(), CHARACTER_B_ITEM_ID);
+
+    let (storage_id, nwn_id) = create_storage_unit(
+        &mut ts,
+        character_a_id,
+        LOCATION_A_HASH,
+        STORAGE_A_ITEM_ID,
+        STORAGE_A_TYPE_ID,
+    );
+    online_storage_unit(&mut ts, user_a(), character_a_id, storage_id, nwn_id, fuel_asset_id);
+
+    // Authorize extension (owner A authorizes)
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let owner_cap = character_a.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
+            ts.ctx(),
+        );
+        storage_unit.authorize_extension<SwapAuth>(&owner_cap);
+        ts::return_shared(storage_unit);
+        character_a.return_owner_cap(owner_cap);
+        ts::return_shared(character_a);
+    };
+
+    // Get character B's owner cap ID for inventory
+    let character_b_owner_cap_id = character_owner_cap_id(&mut ts, character_b_id);
+
+    // User B mints ammo into their ephemeral inventory using OwnerCap<Character>
+    mint_ammo<Character>(&mut ts, storage_id, character_b_id, user_b(), ammo_asset_id);
+
+    // Verify items are in character B's ephemeral inventory
+    ts::next_tx(&mut ts, admin());
+    {
+        let storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        assert!(storage_unit.has_inventory(character_b_owner_cap_id));
+        assert_eq!(storage_unit.item_quantity(character_b_owner_cap_id, ammo_asset_id), AMMO_QUANTITY);
+        ts::return_shared(storage_unit);
+    };
+
+    // User B withdraws using withdraw_item_by_cap with OwnerCap<Character>
+    ts::next_tx(&mut ts, user_b());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        let owner_cap = character_b.borrow_owner_cap<Character>(
+            ts::most_recent_receiving_ticket<OwnerCap<Character>>(&character_b_id),
+            ts.ctx(),
+        );
+
+        let balance = storage_unit.withdraw_item_by_cap<Character, SwapAuth>(
+            &item_registry,
+            &character_b,
+            &owner_cap,
+            SwapAuth {},
+            ammo_asset_id,
+            AMMO_QUANTITY,
+            ts.ctx(),
+        );
+
+        assert_eq!(item_balance::value(&balance), AMMO_QUANTITY);
+        assert_eq!(item_balance::balance_asset_id(&balance), ammo_asset_id);
+
+        // Verify ephemeral inventory is empty
+        assert_eq!(storage_unit.item_quantity(character_b_owner_cap_id, ammo_asset_id), 0);
+
+        // Clean up balance
+        let _ = item_balance::test_decrease_supply(&item_registry, balance);
+
+        character_b.return_owner_cap(owner_cap);
+        ts::return_shared(item_registry);
+        ts::return_shared(storage_unit);
+        ts::return_shared(character_b);
+    };
+    ts::end(ts);
+}
+
+/// Test that withdraw_item_by_cap fails when extension is not authorized
+/// Scenario: Attempt to withdraw using withdraw_item_by_cap without authorizing extension
+/// Expected: Transaction aborts with EExtensionNotAuthorized error
+#[test]
+#[expected_failure(abort_code = storage_unit::EExtensionNotAuthorized)]
+fun test_withdraw_item_by_cap_fail_extension_not_authorized() {
+    let mut ts = ts::begin(governor());
+    setup_nwn(&mut ts);
+    let fuel_asset_id = test_helpers::register_fuel_item(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
+    let character_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
+
+    let (storage_id, nwn_id) = create_storage_unit(
+        &mut ts,
+        character_id,
+        LOCATION_A_HASH,
+        STORAGE_A_ITEM_ID,
+        STORAGE_A_TYPE_ID,
+    );
+    online_storage_unit(&mut ts, user_a(), character_id, storage_id, nwn_id, fuel_asset_id);
+    mint_ammo<StorageUnit>(&mut ts, storage_id, character_id, user_a(), ammo_asset_id);
+
+    // Try to withdraw without authorizing extension - should fail
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        let owner_cap = character.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id),
+            ts.ctx(),
+        );
+
+        let balance = storage_unit.withdraw_item_by_cap<StorageUnit, SwapAuth>(
+            &item_registry,
+            &character,
+            &owner_cap,
+            SwapAuth {},
+            ammo_asset_id,
+            AMMO_QUANTITY,
+            ts.ctx(),
+        );
+
+        let _ = item_balance::test_decrease_supply(&item_registry, balance);
+        character.return_owner_cap(owner_cap);
+        ts::return_shared(item_registry);
+        ts::return_shared(storage_unit);
+        ts::return_shared(character);
+    };
+    ts::end(ts);
+}
+
+/// Test that withdraw_item_by_cap fails when storage unit is offline
+/// Scenario: Attempt to withdraw using withdraw_item_by_cap when storage unit is offline
+/// Expected: Transaction aborts with ENotOnline error
+#[test]
+#[expected_failure(abort_code = storage_unit::ENotOnline)]
+fun test_withdraw_item_by_cap_fail_storage_offline() {
+    let mut ts = ts::begin(governor());
+    test_helpers::setup_world(&mut ts);
+    test_helpers::configure_assembly_energy(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
+    let character_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
+
+    let (storage_id, _nwn_id) = create_storage_unit(
+        &mut ts,
+        character_id,
+        LOCATION_A_HASH,
+        STORAGE_A_ITEM_ID,
+        STORAGE_A_TYPE_ID,
+    );
+
+    // Authorize extension (while offline is allowed)
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let owner_cap = character.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id),
+            ts.ctx(),
+        );
+        storage_unit.authorize_extension<SwapAuth>(&owner_cap);
+        ts::return_shared(storage_unit);
+        character.return_owner_cap(owner_cap);
+        ts::return_shared(character);
+    };
+
+    // Try to withdraw while offline - should fail
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character = ts::take_shared_by_id<Character>(&ts, character_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        let owner_cap = character.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id),
+            ts.ctx(),
+        );
+
+        let balance = storage_unit.withdraw_item_by_cap<StorageUnit, SwapAuth>(
+            &item_registry,
+            &character,
+            &owner_cap,
+            SwapAuth {},
+            ammo_asset_id,
+            AMMO_QUANTITY,
+            ts.ctx(),
+        );
+
+        let _ = item_balance::test_decrease_supply(&item_registry, balance);
+        character.return_owner_cap(owner_cap);
+        ts::return_shared(item_registry);
+        ts::return_shared(storage_unit);
+        ts::return_shared(character);
+    };
+    ts::end(ts);
+}
+
+/// Test that withdraw_item_by_cap fails with wrong sender
+/// Scenario: User B attempts to withdraw from User A's inventory using withdraw_item_by_cap
+/// Expected: Transaction aborts with ESenderCannotAccessCharacter error
+#[test]
+#[expected_failure(abort_code = character::ESenderCannotAccessCharacter)]
+fun test_withdraw_item_by_cap_fail_wrong_sender() {
+    let mut ts = ts::begin(governor());
+    setup_nwn(&mut ts);
+    let fuel_asset_id = test_helpers::register_fuel_item(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
+    let character_a_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
+    let _character_b_id = create_character(&mut ts, user_b(), CHARACTER_B_ITEM_ID);
+
+    let (storage_id, nwn_id) = create_storage_unit(
+        &mut ts,
+        character_a_id,
+        LOCATION_A_HASH,
+        STORAGE_A_ITEM_ID,
+        STORAGE_A_TYPE_ID,
+    );
+    online_storage_unit(&mut ts, user_a(), character_a_id, storage_id, nwn_id, fuel_asset_id);
+    mint_ammo<StorageUnit>(&mut ts, storage_id, character_a_id, user_a(), ammo_asset_id);
+
+    // Authorize extension
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let owner_cap = character_a.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
+            ts.ctx(),
+        );
+        storage_unit.authorize_extension<SwapAuth>(&owner_cap);
+        ts::return_shared(storage_unit);
+        character_a.return_owner_cap(owner_cap);
+        ts::return_shared(character_a);
+    };
+
+    // User B tries to withdraw using character A's owner cap - should fail
+    ts::next_tx(&mut ts, user_b());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        let owner_cap = character_a.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
+            ts.ctx(),
+        );
+
+        let balance = storage_unit.withdraw_item_by_cap<StorageUnit, SwapAuth>(
+            &item_registry,
+            &character_a,
+            &owner_cap,
+            SwapAuth {},
+            ammo_asset_id,
+            AMMO_QUANTITY,
+            ts.ctx(),
+        );
+
+        let _ = item_balance::test_decrease_supply(&item_registry, balance);
+        character_a.return_owner_cap(owner_cap);
+        ts::return_shared(item_registry);
+        ts::return_shared(storage_unit);
+        ts::return_shared(character_a);
+    };
+    ts::end(ts);
+}
+
+/// Test that user A cannot withdraw from character B's inventory using character B's owner cap
+/// Scenario: Character B has items in ephemeral inventory, User A tries to use character B's cap
+/// Expected: Transaction aborts with ESenderCannotAccessCharacter error
+#[test]
+#[expected_failure(abort_code = character::ESenderCannotAccessCharacter)]
+fun test_withdraw_item_by_cap_fail_wrong_character_cap() {
+    let mut ts = ts::begin(governor());
+    setup_nwn(&mut ts);
+    let fuel_asset_id = test_helpers::register_fuel_item(&mut ts);
+    let ammo_asset_id = test_helpers::register_ammo_item(&mut ts);
+    let character_a_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
+    let character_b_id = create_character(&mut ts, user_b(), CHARACTER_B_ITEM_ID);
+
+    // Character A creates storage unit
+    let (storage_id, nwn_id) = create_storage_unit(
+        &mut ts,
+        character_a_id,
+        LOCATION_A_HASH,
+        STORAGE_A_ITEM_ID,
+        STORAGE_A_TYPE_ID,
+    );
+    online_storage_unit(&mut ts, user_a(), character_a_id, storage_id, nwn_id, fuel_asset_id);
+
+    // Authorize extension (owner A authorizes)
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let owner_cap = character_a.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
+            ts.ctx(),
+        );
+        storage_unit.authorize_extension<SwapAuth>(&owner_cap);
+        ts::return_shared(storage_unit);
+        character_a.return_owner_cap(owner_cap);
+        ts::return_shared(character_a);
+    };
+
+    // User B mints ammo into their ephemeral inventory using OwnerCap<Character>
+    mint_ammo<Character>(&mut ts, storage_id, character_b_id, user_b(), ammo_asset_id);
+
+    // User A tries to withdraw using character B's owner cap - should fail
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        // This should fail because user_a cannot access character_b's owner cap
+        let owner_cap = character_b.borrow_owner_cap<Character>(
+            ts::most_recent_receiving_ticket<OwnerCap<Character>>(&character_b_id),
+            ts.ctx(),
+        );
+
+        let balance = storage_unit.withdraw_item_by_cap<Character, SwapAuth>(
+            &item_registry,
+            &character_b,
+            &owner_cap,
+            SwapAuth {},
+            ammo_asset_id,
+            AMMO_QUANTITY,
+            ts.ctx(),
+        );
+
+        let _ = item_balance::test_decrease_supply(&item_registry, balance);
+        character_b.return_owner_cap(owner_cap);
+        ts::return_shared(item_registry);
+        ts::return_shared(storage_unit);
+        ts::return_shared(character_b);
+    };
+    ts::end(ts);
+}
+
 /// Test depositing and withdrawing items by owner
 /// Scenario: Owner withdraws item and deposits it back using owner access
 /// Expected: Items can be withdrawn and deposited successfully by owner
