@@ -8,11 +8,13 @@
 module extension_examples::corpse_gate_bounty;
 
 use extension_examples::config::{Self, AdminCap, XAuth, ExtensionConfig};
-use sui::clock::Clock;
+use sui::{clock::Clock, object::ID};
 use world::{
     access::{OwnerCap, ServerAddressRegistry},
     character::Character,
     gate::{Self, Gate},
+    in_game_id,
+    item_balance::{Self as item_balance, ItemRegistry},
     storage_unit::StorageUnit
 };
 
@@ -36,12 +38,14 @@ public struct BountyConfigKey has copy, drop, store {}
 public fun collect_corpse_bounty<T: key>(
     extension_config: &ExtensionConfig,
     storage_unit: &mut StorageUnit,
+    item_registry: &ItemRegistry,
     server_registry: &ServerAddressRegistry,
     source_gate: &Gate,
     destination_gate: &Gate,
     character: &Character,
     player_inventory_owner_cap: &OwnerCap<T>,
-    corpe_item_id: u64,
+    corpse_asset_id: ID,
+    quantity: u64,
     proximity_proof: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
@@ -54,19 +58,25 @@ public fun collect_corpse_bounty<T: key>(
 
     // Withdraw the corpse from the player's inventory (owner-authorized + proximity proof).
     let corpse = storage_unit.withdraw_by_owner<T>(
+        item_registry,
         server_registry,
         character,
         player_inventory_owner_cap,
-        corpe_item_id,
+        corpse_asset_id,
+        quantity,
         proximity_proof,
         clock,
         ctx,
     );
 
     // Check if the corpse is of the correct type.
-    assert!(corpse.type_id() == bounty_cfg.bounty_type_id, ECorpseTypeMismatch);
+    let corpse_type_id = in_game_id::type_id(
+        &item_balance::item_data(item_registry, item_balance::balance_asset_id(&corpse)).data_key(),
+    );
+    assert!(corpse_type_id == bounty_cfg.bounty_type_id, ECorpseTypeMismatch);
 
     storage_unit.deposit_item<XAuth>(
+        item_registry,
         character,
         corpse,
         config::x_auth(),
