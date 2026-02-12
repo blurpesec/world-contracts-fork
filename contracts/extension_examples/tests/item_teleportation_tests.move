@@ -37,16 +37,15 @@ const FUEL_BURN_RATE_MS: u64 = 3600 * 1000;
 const MAX_ENERGY_PRODUCTION: u64 = 100;
 const DEPOSIT_QTY: u64 = 5;
 
-#[test]
-/// Demonstrates ITEM TELEPORTATION:
+#[test, expected_failure(abort_code = storage_unit::EBoundBalanceMismatch)]
+/// Demonstrates that ITEM TELEPORTATION is now BLOCKED:
 /// 1. Lock items in storage_unit_A (source)
-/// 2. Get a DepositReceipt (not bound to any storage unit)
-/// 3. Redeem the receipt directly into storage_unit_B (destination)
+/// 2. Get a DepositReceipt (bound to storage_unit_A)
+/// 3. Attempt to redeem into storage_unit_B → ABORTS with EBoundBalanceMismatch
 ///
-/// Key insight: DepositReceipts are NOT bound to any storage unit.
-/// This enables "teleporting" items between storage units by locking in one
-/// and redeeming to another.
-fun teleport_items_from_storage_a_to_storage_b() {
+/// Key insight: DepositReceipts are now bound to their origin storage unit.
+/// This prevents "teleporting" items between storage units without proximity proof.
+fun teleport_items_from_storage_a_to_storage_b_blocked() {
     let mut ts = ts::begin(governor());
     let (
         storage_unit_a_id,
@@ -137,6 +136,91 @@ fun teleport_items_from_storage_a_to_storage_b() {
         let inventory_qty = inventory.balance_value(asset_id);
         assert_eq!(inventory_qty, DEPOSIT_QTY); // Items appeared in B!
         ts::return_shared(storage_unit_b);
+    };
+
+    ts::end(ts);
+}
+
+#[test]
+/// Demonstrates that items CAN be deposited back to the SAME storage unit:
+/// 1. Lock items in storage_unit_A
+/// 2. Get a DepositReceipt (bound to storage_unit_A)
+/// 3. Redeem the receipt back into storage_unit_A → SUCCESS
+///
+/// This is the correct pattern for deposit receipts.
+fun deposit_receipt_same_storage_unit_works() {
+    let mut ts = ts::begin(governor());
+    let (
+        storage_unit_a_id,
+        character_a_id,
+        _character_b_id,
+        nwn_id,
+    ) = setup_environment(&mut ts);
+    let (asset_id) = setup_items(&mut ts);
+    let (fuel_asset_id) = setup_fuel_item(&mut ts);
+
+    bring_online(&mut ts, character_a_id, nwn_id, storage_unit_a_id, fuel_asset_id);
+    authorize_extension(&mut ts, character_a_id, storage_unit_a_id);
+    owner_mint_into_storage(&mut ts, character_a_id, storage_unit_a_id, asset_id, DEPOSIT_QTY);
+
+    // Initial check - DEPOSIT_QTY exists
+    ts::next_tx(&mut ts, user_a());
+    {
+        let storage_unit_a = ts::take_shared_by_id<StorageUnit>(&ts, storage_unit_a_id);
+        let owner_cap_id = storage_unit_a.owner_cap_id();
+        let inventory = storage_unit_a.inventory(owner_cap_id);
+        assert_eq!(inventory.balance_value(asset_id), DEPOSIT_QTY);
+        ts::return_shared(storage_unit_a);
+    };
+
+    // Lock items into a receipt
+    lock_items(&mut ts, storage_unit_a_id, character_a_id, asset_id, DEPOSIT_QTY);
+
+    // Verify items are withdrawn (inventory should be 0)
+    ts::next_tx(&mut ts, user_a());
+    {
+        let storage_unit_a = ts::take_shared_by_id<StorageUnit>(&ts, storage_unit_a_id);
+        let owner_cap_id = storage_unit_a.owner_cap_id();
+        let inventory = storage_unit_a.inventory(owner_cap_id);
+        assert_eq!(inventory.balance_value(asset_id), 0);
+        ts::return_shared(storage_unit_a);
+    };
+
+    // Redeem receipt back INTO the SAME storage unit
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit_a = ts::take_shared_by_id<StorageUnit>(&ts, storage_unit_a_id);
+        let character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        let receipt = ts::take_from_sender<DepositReceipt>(&ts);
+
+        // Verify receipt is bound to storage_unit_A
+        assert_eq!(item_teleportation::origin_storage_unit_id(&receipt), storage_unit_a_id);
+        assert_eq!(item_teleportation::value(&receipt), DEPOSIT_QTY);
+
+        // Redeem back to the SAME storage unit - this works!
+        item_teleportation::redeem_to_storage(
+            &mut storage_unit_a,
+            &item_registry,
+            &character_a,
+            receipt,
+            item_teleportation::auth(),
+            ts.ctx(),
+        );
+
+        ts::return_shared(item_registry);
+        ts::return_shared(character_a);
+        ts::return_shared(storage_unit_a);
+    };
+
+    // Verify items are back
+    ts::next_tx(&mut ts, user_a());
+    {
+        let storage_unit_a = ts::take_shared_by_id<StorageUnit>(&ts, storage_unit_a_id);
+        let owner_cap_id = storage_unit_a.owner_cap_id();
+        let inventory = storage_unit_a.inventory(owner_cap_id);
+        assert_eq!(inventory.balance_value(asset_id), DEPOSIT_QTY);
+        ts::return_shared(storage_unit_a);
     };
 
     ts::end(ts);
