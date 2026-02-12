@@ -12,7 +12,6 @@ use sui::test_scenario as ts;
 use world::access::{AdminCap, OwnerCap};
 use world::character::{Self as character, Character};
 use world::energy::EnergyConfig;
-use world::inventory::Inventory;
 use world::item_balance::{Self as item_balance, ItemRegistry};
 use world::network_node::{Self as network_node, NetworkNode};
 use world::object_registry::ObjectRegistry;
@@ -23,11 +22,15 @@ const CHARACTER_A_GAME_ID: u32 = 1;
 const CHARACTER_B_GAME_ID: u32 = 2;
 const TRIBE_ID: u32 = 7;
 const STORAGE_TYPE_ID: u64 = 5555;
-const STORAGE_ITEM_ID: u64 = 90002;
+const STORAGE_ITEM_ID_A: u64 = 90002;
+const STORAGE_ITEM_ID_B: u64 = 90003;
 const NWN_TYPE_ID: u64 = 111000;
-const NWN_ITEM_ID: u64 = 5000;
-const LOCATION_HASH: vector<u8> =
+const NWN_ITEM_ID_A: u64 = 5000;
+const NWN_ITEM_ID_B: u64 = 5001;
+const LOCATION_HASH_A: vector<u8> =
     x"7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b";
+const LOCATION_HASH_B: vector<u8> =
+    x"7a8f3f2e9c4d1a6f5e8b2d9c3f7a1e5b7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b";
 const STORAGE_CAPACITY: u64 = 100000;
 const FUEL_MAX_CAPACITY: u64 = 1000;
 const FUEL_BURN_RATE_MS: u64 = 3600 * 1000;
@@ -35,63 +38,105 @@ const MAX_ENERGY_PRODUCTION: u64 = 100;
 const DEPOSIT_QTY: u64 = 5;
 
 #[test]
-/// Lock items in storage_unit_A, redeem the receipt, and deposit balance into storage_unit_B.
-/// This demonstrates cross-storage redemption via the `redeem` + manual deposit path.
+/// Demonstrates ITEM TELEPORTATION:
+/// 1. Lock items in storage_unit_A (source)
+/// 2. Get a DepositReceipt (not bound to any storage unit)
+/// 3. Redeem the receipt directly into storage_unit_B (destination)
 ///
-/// Key insight: the `redeem` function returns an `ItemBalance` that is NOT bound to any
-/// storage unit, so it can be deposited into a different storage unit than it originated from.
-fun lock_in_one_storage_redeem_to_another() {
+/// Key insight: DepositReceipts are NOT bound to any storage unit.
+/// This enables "teleporting" items between storage units by locking in one
+/// and redeeming to another.
+fun teleport_items_from_storage_a_to_storage_b() {
     let mut ts = ts::begin(governor());
     let (
         storage_unit_a_id,
         character_a_id,
         _character_b_id,
-        asset_id,
-        fuel_asset_id,
         nwn_id,
     ) = setup_environment(&mut ts);
-
-    // Setup: bring online, authorize, and deposit items into storage_unit_A.
+    let (asset_id) = setup_items(&mut ts);
+    let (fuel_asset_id) = setup_fuel_item(&mut ts);
+    // Setup storage_unit_A: bring online, authorize extension, deposit items.
     bring_online(&mut ts, character_a_id, nwn_id, storage_unit_a_id, fuel_asset_id);
     authorize_extension(&mut ts, character_a_id, storage_unit_a_id);
     owner_mint_into_storage(&mut ts, character_a_id, storage_unit_a_id, asset_id, DEPOSIT_QTY);
 
-    // Lock items in storage_unit_A and get a receipt.
-    lock_items(&mut ts, storage_unit_a_id, character_a_id, asset_id, DEPOSIT_QTY);
-
-    // Redeem the receipt and verify we can get the ItemBalance out.
+    // Create storage_unit_B and bring it online (reuse existing world setup).
+    let (storage_unit_b_id, nwn_b_id) = anchor_infra(
+        &mut ts,
+        character_a_id,
+        STORAGE_ITEM_ID_B,
+        NWN_ITEM_ID_B,
+        LOCATION_HASH_B,
+    );
+    bring_online(&mut ts, character_a_id, nwn_b_id, storage_unit_b_id, fuel_asset_id);
+    authorize_extension(&mut ts, character_a_id, storage_unit_b_id);
+    // Initial check - DEPOSIT_QTY exists in A
     ts::next_tx(&mut ts, user_a());
     {
-        let item_registry = ts::take_shared<ItemRegistry>(&mut ts);
-        let receipt = ts::take_from_sender<DepositReceipt>(&mut ts);
-
-        // Verify receipt is from storage_unit_A.
-        assert_eq!(item_teleportation::assembly_id(&receipt), storage_unit_a_id);
-        assert_eq!(item_teleportation::value(&receipt), DEPOSIT_QTY);
-
-        // Redeem to get the ItemBalance - this balance is now "free" and can go anywhere.
-        let (origin_assembly_id, balance) = item_teleportation::redeem(receipt, ts.ctx());
-        assert_eq!(origin_assembly_id, storage_unit_a_id);
-        assert_eq!(item_balance::value(&balance), DEPOSIT_QTY);
-        assert_eq!(item_balance::balance_asset_id(&balance), asset_id);
-
-        // The balance is not bound to storage_unit_A anymore - in a real scenario,
-        // this could be deposited into ANY storage unit (e.g., storage_unit_B).
-        // For simplicity, we just destroy it here since creating a second storage
-        // unit in test_scenario is complex due to receiving ticket limitations.
-        let _ = item_balance::test_decrease_supply(&item_registry, balance);
-        ts::return_shared(item_registry);
-    };
-
-    // Verify storage_unit_A no longer has the items (they were locked and redeemed).
-    ts::next_tx(&mut ts, user_a());
-    {
-        let storage_unit_a = ts::take_shared_by_id<StorageUnit>(&mut ts, storage_unit_a_id);
+        let storage_unit_a = ts::take_shared_by_id<StorageUnit>(&ts, storage_unit_a_id);
         let owner_cap_id = storage_unit_a.owner_cap_id();
         let inventory = storage_unit_a.inventory(owner_cap_id);
         let inventory_qty = inventory.balance_value(asset_id);
-        assert_eq!(inventory_qty, 0);
+        assert_eq!(inventory_qty, DEPOSIT_QTY); // Items are starting in A!
         ts::return_shared(storage_unit_a);
+    };
+
+    // === TELEPORTATION STEP 1: Lock items in storage_unit_A ===
+    // This withdraws items from A and wraps them in a receipt.
+    lock_items(&mut ts, storage_unit_a_id, character_a_id, asset_id, DEPOSIT_QTY);
+
+    // === TELEPORTATION STEP 2: Redeem receipt directly into storage_unit_B ===
+    // This deposits the items into B - completing the teleportation!
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit_b = ts::take_shared_by_id<StorageUnit>(&ts, storage_unit_b_id);
+        let character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let item_registry = ts::take_shared<ItemRegistry>(&ts);
+        let receipt = ts::take_from_sender<DepositReceipt>(&ts);
+
+        // Verify receipt has expected value.
+        assert_eq!(item_teleportation::value(&receipt), DEPOSIT_QTY);
+        assert_eq!(item_teleportation::asset_id(&receipt), asset_id);
+
+        // Redeem receipt INTO storage_unit_B (not A!).
+        // This is the "teleportation" - items came from A but go into B.
+        // Note: No owner_cap required - the extension auth pattern is used instead.
+        item_teleportation::redeem_to_storage(
+            &mut storage_unit_b,
+            &item_registry,
+            &character_a,
+            receipt,
+            item_teleportation::auth(),
+            ts.ctx(),
+        );
+
+        ts::return_shared(item_registry);
+        ts::return_shared(character_a);
+        ts::return_shared(storage_unit_b);
+    };
+
+    // === VERIFY TELEPORTATION RESULT ===
+    // storage_unit_A should have 0 items.
+    ts::next_tx(&mut ts, user_a());
+    {
+        let storage_unit_a = ts::take_shared_by_id<StorageUnit>(&ts, storage_unit_a_id);
+        let owner_cap_id = storage_unit_a.owner_cap_id();
+        let inventory = storage_unit_a.inventory(owner_cap_id);
+        let inventory_qty = inventory.balance_value(asset_id);
+        assert_eq!(inventory_qty, 0); // Items are gone from A!
+        ts::return_shared(storage_unit_a);
+    };
+
+    // storage_unit_B should have DEPOSIT_QTY items.
+    ts::next_tx(&mut ts, user_a());
+    {
+        let storage_unit_b = ts::take_shared_by_id<StorageUnit>(&ts, storage_unit_b_id);
+        let owner_cap_id = storage_unit_b.owner_cap_id();
+        let inventory = storage_unit_b.inventory(owner_cap_id);
+        let inventory_qty = inventory.balance_value(asset_id);
+        assert_eq!(inventory_qty, DEPOSIT_QTY); // Items appeared in B!
+        ts::return_shared(storage_unit_b);
     };
 
     ts::end(ts);
@@ -99,18 +144,23 @@ fun lock_in_one_storage_redeem_to_another() {
 
 // === Helpers ===
 
-fun setup_environment(ts: &mut ts::Scenario): (ID, ID, ID, ID, ID, ID) {
+fun setup_items(ts: &mut ts::Scenario): (ID) {
+    test_helpers::register_ammo_item(ts)
+}
+
+fun setup_fuel_item(ts: &mut ts::Scenario): (ID) {
+    test_helpers::register_fuel_item(ts)
+}
+
+fun setup_environment(ts: &mut ts::Scenario): (ID, ID, ID, ID) {
     test_helpers::setup_world(ts);
     test_helpers::configure_fuel(ts);
     test_helpers::configure_assembly_energy(ts);
 
-    let asset_id = test_helpers::register_ammo_item(ts);
-    let fuel_asset_id = test_helpers::register_fuel_item(ts);
-
     let (character_a_id, character_b_id) = create_characters(ts);
-    let (storage_unit_id, nwn_id) = anchor_infra(ts, character_a_id);
+    let (storage_unit_id, nwn_id) = anchor_infra(ts, character_a_id, STORAGE_ITEM_ID_A, NWN_ITEM_ID_A, LOCATION_HASH_A);
 
-    (storage_unit_id, character_a_id, character_b_id, asset_id, fuel_asset_id, nwn_id)
+    (storage_unit_id, character_a_id, character_b_id, nwn_id)
 }
 
 fun create_characters(ts: &mut ts::Scenario): (ID, ID) {
@@ -154,22 +204,22 @@ fun create_characters(ts: &mut ts::Scenario): (ID, ID) {
     (character_a_id, character_b_id)
 }
 
-fun anchor_infra(ts: &mut ts::Scenario, character_a_id: ID): (ID, ID) {
+fun anchor_infra(ts: &mut ts::Scenario, character_a_id: ID, storage_unit_id_to_use:u64, nwn_id_to_use: u64,location_hash_to_use: vector<u8> ): (ID, ID) {
     ts::next_tx(ts, admin());
     let storage_unit_id;
     let nwn_id;
     {
         let mut registry = ts::take_shared<ObjectRegistry>(ts);
         let admin_cap = ts::take_from_sender<AdminCap>(ts);
-        let mut character_a = ts::take_shared_by_id<Character>(ts, character_a_id);
+        let character_a = ts::take_shared_by_id<Character>(ts, character_a_id);
 
         let mut nwn = network_node::anchor(
             &mut registry,
             &character_a,
             &admin_cap,
-            NWN_ITEM_ID,
+            nwn_id_to_use,
             NWN_TYPE_ID,
-            LOCATION_HASH,
+            location_hash_to_use,
             FUEL_MAX_CAPACITY,
             FUEL_BURN_RATE_MS,
             MAX_ENERGY_PRODUCTION,
@@ -182,10 +232,10 @@ fun anchor_infra(ts: &mut ts::Scenario, character_a_id: ID): (ID, ID) {
             &mut nwn,
             &character_a,
             &admin_cap,
-            STORAGE_ITEM_ID,
+            storage_unit_id_to_use,
             STORAGE_TYPE_ID,
             STORAGE_CAPACITY,
-            LOCATION_HASH,
+            location_hash_to_use,
             ts.ctx(),
         );
         storage_unit_id = object::id(&su);
@@ -308,37 +358,6 @@ fun owner_mint_into_storage(
     };
 }
 
-fun nonowner_mint_into_storage(
-    ts: &mut ts::Scenario,
-    character_b_id: ID,
-    storage_unit_id: ID,
-    asset_id: ID,
-    quantity: u64,
-) {
-    ts::next_tx(ts, user_b());
-    {
-        let mut su = ts::take_shared_by_id<StorageUnit>(ts, storage_unit_id);
-        let mut character_b = ts::take_shared_by_id<Character>(ts, character_b_id);
-        let item_registry = ts::take_shared<ItemRegistry>(ts);
-        let owner_cap = character_b.borrow_owner_cap<Character>(
-            ts::most_recent_receiving_ticket<OwnerCap<Character>>(&character_b_id),
-            ts.ctx(),
-        );
-        su.game_item_to_chain_inventory_test<Character>(
-            &item_registry,
-            &character_b,
-            &owner_cap,
-            asset_id,
-            quantity,
-            ts.ctx(),
-        );
-        character_b.return_owner_cap(owner_cap);
-        ts::return_shared(item_registry);
-        ts::return_shared(character_b);
-        ts::return_shared(su);
-    };
-}
-
 fun lock_items(
     ts: &mut ts::Scenario,
     storage_unit_id: ID,
@@ -361,7 +380,6 @@ fun lock_items(
             &mut su,
             &item_registry,
             &character_a,
-            &owner_cap,
             asset_id,
             quantity,
             item_teleportation::auth(),
@@ -377,65 +395,3 @@ fun lock_items(
     receipt_id
 }
 
-const STORAGE_B_ITEM_ID: u64 = 90003;
-
-fun anchor_second_storage_unit(
-    ts: &mut ts::Scenario,
-    character_a_id: ID,
-    nwn_id: ID,
-): ID {
-    ts::next_tx(ts, admin());
-    let storage_unit_b_id;
-    {
-        let mut registry = ts::take_shared<ObjectRegistry>(ts);
-        let admin_cap = ts::take_from_sender<AdminCap>(ts);
-        let character_a = ts::take_shared_by_id<Character>(ts, character_a_id);
-        let mut nwn = ts::take_shared_by_id<NetworkNode>(ts, nwn_id);
-
-        let su_b = storage_unit::anchor(
-            &mut registry,
-            &mut nwn,
-            &character_a,
-            &admin_cap,
-            STORAGE_B_ITEM_ID,
-            STORAGE_TYPE_ID,
-            STORAGE_CAPACITY,
-            LOCATION_HASH,
-            ts.ctx(),
-        );
-        storage_unit_b_id = object::id(&su_b);
-
-        storage_unit::share_storage_unit(su_b, &admin_cap);
-
-        ts::return_shared(nwn);
-        ts::return_shared(character_a);
-        ts::return_shared(registry);
-        ts::return_to_sender(ts, admin_cap);
-    };
-    storage_unit_b_id
-}
-
-fun bring_second_storage_online(
-    ts: &mut ts::Scenario,
-    character_a_id: ID,
-    nwn_id: ID,
-    storage_unit_b_id: ID,
-) {
-    ts::next_tx(ts, user_a());
-    {
-        let mut character_a = ts::take_shared_by_id<Character>(ts, character_a_id);
-        let mut su_b = ts::take_shared_by_id<StorageUnit>(ts, storage_unit_b_id);
-        let mut nwn = ts::take_shared_by_id<NetworkNode>(ts, nwn_id);
-        let energy_config = ts::take_shared<EnergyConfig>(ts);
-        let owner_cap = character_a.borrow_owner_cap<StorageUnit>(
-            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
-            ts.ctx(),
-        );
-        su_b.online(&mut nwn, &energy_config, &owner_cap);
-        character_a.return_owner_cap(owner_cap);
-        ts::return_shared(energy_config);
-        ts::return_shared(nwn);
-        ts::return_shared(su_b);
-        ts::return_shared(character_a);
-    };
-}

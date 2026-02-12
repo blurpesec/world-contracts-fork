@@ -1,26 +1,21 @@
-/// Coin-like deposit receipts for storage unit inventories.
+/// Item Teleportation: Lock items in one storage unit, redeem them in another.
 ///
-/// `DepositReceipt` is modeled after `sui::coin::Coin<T>` — a transferable object
-/// that embeds its value directly. Receipts are fungible within the same
-/// `(assembly_id, asset_id)` scope, enabling split/join without external state.
+/// `DepositReceipt` wraps an `ItemBalance` into a transferable object.
+/// Unlike `deposit_receipts`, teleportation receipts are NOT bound to any
+/// specific storage unit — they can be redeemed into ANY authorized storage unit.
 ///
-/// ## Design parallels with Coin
+/// ## Teleportation Flow
 ///
-/// | Coin<T>                      | DepositReceipt                           |
-/// |------------------------------|------------------------------------------|
-/// | `Balance<T>` embedded        | `ItemBalance` embedded                   |
-/// | Fungible by type `T`         | Fungible by `(assembly_id, asset_id)`    |
-/// | `split`/`join` self-contained| `split`/`join` self-contained            |
-/// | `into_balance`/`from_balance`| `into_balance`/`from_balance`            |
-/// | `TreasuryCap` mints          | `lock_and_mint` mints from storage unit  |
+/// 1. **Lock** items in storage_unit_A via `lock_and_mint` → get `DepositReceipt`
+/// 2. **Transfer** the receipt to anyone (it's a first-class Sui object)
+/// 3. **Redeem** into storage_unit_B via `redeem_to_storage` → items appear in B
 ///
-/// Supply accounting remains event-based (no on-chain total_supply).
+/// This enables instant cross-location item transfer without physical travel.
 module extension_examples::item_teleportation;
 
 use std::string::String;
 use sui::event;
 use world::{
-    access::OwnerCap,
     character::Character,
     item_balance::{Self, ItemBalance, ItemData, ItemRegistry},
     storage_unit::StorageUnit
@@ -30,8 +25,6 @@ use world::{
 #[error(code = 0)]
 const EQuantityZero: vector<u8> = b"Quantity must be > 0";
 #[error(code = 1)]
-const EAssemblyMismatch: vector<u8> = b"Receipt assembly mismatch";
-#[error(code = 2)]
 const EAssetMismatch: vector<u8> = b"Receipts must reference the same asset";
 #[error(code = 3)]
 const EBatchEmpty: vector<u8> = b"Batch cannot be empty";
@@ -45,13 +38,11 @@ const ENonZero: vector<u8> = b"Cannot destroy non-zero receipt";
 /// Witness type authorized by storage unit owners via `authorize_extension`.
 public struct DepositReceiptsAuth has drop {}
 
-/// Transferable receipt bound to a single storage unit, embedding its balance.
-/// Modeled after `sui::coin::Coin<T>` — the receipt IS the value.
+/// Transferable receipt wrapping an ItemBalance for teleportation.
+/// NOT bound to any specific storage unit — can be redeemed anywhere.
 public struct DepositReceipt has key, store {
     id: UID,
-    /// The storage unit these items originated from (fungibility boundary).
-    assembly_id: ID,
-    /// The escrowed item balance (self-contained, like Coin embeds Balance).
+    /// The wrapped item balance.
     balance: ItemBalance,
 }
 
@@ -85,11 +76,6 @@ public fun value(self: &DepositReceipt): u64 {
     self.balance.value()
 }
 
-/// Returns the storage unit ID this receipt is bound to.
-public fun assembly_id(self: &DepositReceipt): ID {
-    self.assembly_id
-}
-
 /// Returns the asset ID for this receipt.
 public fun asset_id(self: &DepositReceipt): ID {
     self.balance.balance_asset_id()
@@ -115,59 +101,46 @@ public fun item_url(registry: &ItemRegistry, receipt: &DepositReceipt): String {
     item_balance::data_url(item_data(registry, receipt))
 }
 
-// === Balance Morphing (mirrors Coin.into_balance / from_balance) ===
+// === Balance Morphing ===
 
 /// Wrap an `ItemBalance` into a `DepositReceipt` to make it transferable.
-/// Mirrors `coin::from_balance`.
-public fun from_balance(
-    assembly_id: ID,
-    balance: ItemBalance,
-    ctx: &mut TxContext,
-): DepositReceipt {
+public fun from_balance(balance: ItemBalance, ctx: &mut TxContext): DepositReceipt {
     DepositReceipt {
         id: object::new(ctx),
-        assembly_id,
         balance,
     }
 }
 
-/// Consume the receipt and return the embedded balance with its assembly origin.
-/// Mirrors `coin::into_balance`.
-public fun into_balance(receipt: DepositReceipt): (ID, ItemBalance) {
-    let DepositReceipt { id, assembly_id, balance } = receipt;
+/// Consume the receipt and return the embedded balance.
+public fun into_balance(receipt: DepositReceipt): ItemBalance {
+    let DepositReceipt { id, balance } = receipt;
     id.delete();
-    (assembly_id, balance)
+    balance
 }
 
 // === Split / Join (mirrors Coin, self-contained) ===
 
 /// Split `amount` from the receipt into a new receipt.
-/// Mirrors `coin::split`.
 public fun split(self: &mut DepositReceipt, amount: u64, ctx: &mut TxContext): DepositReceipt {
     DepositReceipt {
         id: object::new(ctx),
-        assembly_id: self.assembly_id,
         balance: self.balance.split(amount),
     }
 }
 
 /// Consume receipt `other` and add its value to `self`.
-/// Aborts if `assembly_id` or `asset_id` don't match.
-/// Mirrors `coin::join`.
+/// Aborts if `asset_id` doesn't match.
 public fun join(self: &mut DepositReceipt, other: DepositReceipt) {
-    let DepositReceipt { id, assembly_id, balance } = other;
-    assert!(assembly_id == self.assembly_id, EAssemblyMismatch);
+    let DepositReceipt { id, balance } = other;
     assert!(balance.balance_asset_id() == self.balance.balance_asset_id(), EAssetMismatch);
     id.delete();
     self.balance.join(balance);
 }
 
-/// Create a zero-value receipt for the given assembly and asset.
-/// Useful for accumulating values. Mirrors `coin::zero`.
-public fun zero(assembly_id: ID, asset_id: ID, ctx: &mut TxContext): DepositReceipt {
+/// Create a zero-value receipt for the given asset.
+public fun zero(asset_id: ID, ctx: &mut TxContext): DepositReceipt {
     DepositReceipt {
         id: object::new(ctx),
-        assembly_id,
         balance: item_balance::zero(asset_id),
     }
 }
@@ -188,7 +161,6 @@ public fun lock_and_mint(
     storage_unit: &mut StorageUnit,
     item_registry: &ItemRegistry,
     character: &Character,
-    owner_cap: &OwnerCap<StorageUnit>,
     asset_id: ID,
     quantity: u64,
     _auth: DepositReceiptsAuth,
@@ -208,7 +180,6 @@ public fun lock_and_mint(
 
     let receipt = DepositReceipt {
         id: object::new(ctx),
-        assembly_id,
         balance,
     };
 
@@ -224,26 +195,13 @@ public fun lock_and_mint(
 }
 
 /// Redeem a receipt and return the embedded balance.
-/// Emits `ReceiptRedeemedEvent` for off-chain tracking.
-public fun redeem(receipt: DepositReceipt, ctx: &TxContext): (ID, ItemBalance) {
-    let receipt_id = object::id(&receipt);
-    let assembly_id = receipt.assembly_id;
-    let asset_id = receipt.balance.balance_asset_id();
-    let quantity = receipt.balance.value();
-
-    event::emit(ReceiptRedeemedEvent {
-        receipt_id,
-        assembly_id,
-        asset_id,
-        quantity,
-        redeemer: ctx.sender(),
-    });
-
+public fun redeem(receipt: DepositReceipt): ItemBalance {
     into_balance(receipt)
 }
 
-/// Redeem a receipt directly back into a storage unit.
-/// Verifies the receipt matches the target storage unit.
+/// Redeem a receipt directly into ANY storage unit.
+/// This is the "teleportation" endpoint — items locked in storage_unit_A
+/// can be redeemed into storage_unit_B.
 public fun redeem_to_storage(
     storage_unit: &mut StorageUnit,
     item_registry: &ItemRegistry,
@@ -253,8 +211,6 @@ public fun redeem_to_storage(
     ctx: &mut TxContext,
 ) {
     let target_assembly_id = object::id(storage_unit);
-    // assert!(receipt.assembly_id == target_assembly_id, EAssemblyMismatch);
-
     let receipt_id = object::id(&receipt);
     let asset_id = receipt.balance.balance_asset_id();
     let quantity = receipt.balance.value();
@@ -267,7 +223,7 @@ public fun redeem_to_storage(
         redeemer: ctx.sender(),
     });
 
-    let (_, balance) = into_balance(receipt);
+    let balance = into_balance(receipt);
 
     storage_unit.deposit_item<DepositReceiptsAuth>(
         item_registry,
@@ -285,7 +241,6 @@ public fun batch_lock(
     storage_unit: &mut StorageUnit,
     item_registry: &ItemRegistry,
     character: &Character,
-    owner_cap: &OwnerCap<StorageUnit>,
     asset_ids: vector<ID>,
     quantities: vector<u64>,
     _auth: DepositReceiptsAuth,
@@ -301,7 +256,6 @@ public fun batch_lock(
                 storage_unit,
                 item_registry,
                 character,
-                owner_cap,
                 asset_id,
                 quantity,
                 DepositReceiptsAuth {},
@@ -314,22 +268,18 @@ public fun batch_lock(
 }
 
 /// Redeem multiple receipts in one call.
-public fun batch_redeem(
-    receipts: vector<DepositReceipt>,
-    ctx: &TxContext,
-): vector<ItemBalance> {
+public fun batch_redeem(receipts: vector<DepositReceipt>): vector<ItemBalance> {
     assert!(receipts.length() > 0, EBatchEmpty);
 
     let mut balances = vector::empty<ItemBalance>();
     receipts.do!(|receipt| {
-        let (_, balance) = redeem(receipt, ctx);
-        balances.push_back(balance);
+        balances.push_back(redeem(receipt));
     });
 
     balances
 }
 
-/// Join multiple receipts of the same (assembly_id, asset_id) into one.
+/// Join multiple receipts of the same asset into one.
 public fun join_vec(mut receipts: vector<DepositReceipt>): DepositReceipt {
     assert!(receipts.length() > 0, EBatchEmpty);
 
@@ -361,14 +311,12 @@ public fun divide_into_n(
 // === Test Functions ===
 #[test_only]
 public fun test_mint(
-    assembly_id: ID,
     asset_id: ID,
     _quantity: u64,
     ctx: &mut TxContext,
 ): DepositReceipt {
     DepositReceipt {
         id: object::new(ctx),
-        assembly_id,
-        balance: item_balance::zero(asset_id), // Will need to use test_increase_supply in actual tests
+        balance: item_balance::zero(asset_id),
     }
 }
