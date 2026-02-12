@@ -75,11 +75,16 @@ public fun collect_corpse_bounty<T: key>(
     );
     assert!(corpse_type_id == bounty_cfg.bounty_type_id, ECorpseTypeMismatch);
 
-    storage_unit.deposit_item<XAuth>(
+    // Deposit the corpse back into the storage unit (owner-authorized + proximity proof).
+    // Using deposit_by_owner since we have the owner cap and proximity was already verified.
+    storage_unit.deposit_by_owner<T>(
         item_registry,
-        character,
         corpse,
-        config::x_auth(),
+        server_registry,
+        character,
+        player_inventory_owner_cap,
+        proximity_proof,
+        clock,
         ctx,
     );
 
