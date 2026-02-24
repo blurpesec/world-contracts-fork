@@ -1,7 +1,7 @@
 /// This module implements the logic of inventory operations such as depositing, withdrawing and transferring items between inventories.
 ///
 /// Bridging items from game to chain and back:
-/// - The game is the “trusted bridge” for bringing items from the game to the chain.
+/// - The game is the "trusted bridge" for bringing items from the game to the chain.
 /// - To bridge an item from game to chain, the game server will call an authenticated on-chain function to mint the item into an on-chain inventory.
 /// - To bridge an item from chain to game, the chain emits an event and burns the on-chain item. The game server listens to the event to create the item in the game.
 /// - The `game to chain`(mint) action is restricted by an admin capability and the `chain to game`(burn) action is restricted by a proximity proof.
@@ -52,7 +52,14 @@ public struct Item has key, store {
     item_id: u64,
     volume: u64,
     quantity: u32,
-    location: Location,
+}
+
+/// Hot-potato representing the transit location of an Item.
+/// Created by package-internal withdrawal logic and consumed by deposit logic.
+/// No abilities — must be consumed in the same transaction it was created.
+public struct ItemLocation {
+    type_id: u64,
+    location_hash: vector<u8>,
 }
 
 // === Events ===
@@ -113,8 +120,8 @@ public fun contains_item(inventory: &Inventory, type_id: u64): bool {
     inventory.items.contains(&type_id)
 }
 
-public fun get_item_location_hash(item: &Item): vector<u8> {
-    item.location.hash()
+public fun get_item_location_hash(item_location: &ItemLocation): vector<u8> {
+    item_location.location_hash
 }
 
 public fun max_capacity(inventory: &Inventory): u64 {
@@ -141,6 +148,21 @@ public(package) fun create(max_capacity: u64): Inventory {
     }
 }
 
+/// Mints an ItemLocation hot-potato. Only callable within the world package.
+public(package) fun create_item_location(item: &Item, location_hash: vector<u8>): ItemLocation {
+    ItemLocation {
+        type_id: item.type_id,
+        location_hash,
+    }
+}
+
+/// Consumes an ItemLocation hot-potato. Only callable within the world package.
+/// Returns (type_id, location_hash) for validation before destruction.
+public(package) fun consume_item_location(item_location: ItemLocation): (u64, vector<u8>) {
+    let ItemLocation { type_id, location_hash } = item_location;
+    (type_id, location_hash)
+}
+
 /// Mints items into inventory (Game → Chain bridge)
 /// Admin-only function for trusted game server
 /// Creates new item or adds to existing if type_id already exists
@@ -154,7 +176,6 @@ public(package) fun mint_items(
     type_id: u64,
     volume: u64,
     quantity: u32,
-    location_hash: vector<u8>,
     ctx: &mut TxContext,
 ) {
     assert!(type_id != 0, ETypeIdEmpty);
@@ -170,7 +191,6 @@ public(package) fun mint_items(
             item_id,
             volume,
             quantity,
-            location: location::attach(location_hash),
         };
 
         let req_capacity = calculate_volume(volume, quantity);
@@ -245,8 +265,7 @@ public(package) fun deposit_item(
             type_id,
             quantity: item.quantity,
         });
-        let Item { id, location, .. } = item;
-        location.remove();
+        let Item { id, .. } = item;
         id.delete();
     } else {
         inventory.used_capacity = inventory.used_capacity + req_capacity;
@@ -300,7 +319,7 @@ public(package) fun delete(inventory: Inventory, assembly_id: ID, assembly_key: 
     // Burn the items one by one
     while (!items.is_empty()) {
         let (_, item) = items.pop();
-        let Item { id, item_id, type_id, quantity, location, .. } = item;
+        let Item { id, item_id, type_id, quantity, .. } = item;
 
         event::emit(ItemDestroyedEvent {
             assembly_id,
@@ -310,7 +329,6 @@ public(package) fun delete(inventory: Inventory, assembly_id: ID, assembly_key: 
             quantity,
         });
 
-        location.remove();
         id.delete();
     };
     items.destroy_empty();
@@ -376,7 +394,7 @@ fun destroy_item(
     inventory_assembly_id: ID,
     inventory_assembly_key: TenantItemId,
 ) {
-    let Item { id, item_id, type_id, quantity, location, .. } = item;
+    let Item { id, item_id, type_id, quantity, .. } = item;
 
     event::emit(ItemBurnedEvent {
         assembly_id: inventory_assembly_id,
@@ -388,7 +406,6 @@ fun destroy_item(
         quantity,
     });
 
-    location.remove();
     id.delete();
 }
 
@@ -439,12 +456,6 @@ public fun used_capacity(inventory: &Inventory): u64 {
 #[test_only]
 public fun item_quantity(inventory: &Inventory, type_id: u64): u32 {
     inventory.items[&type_id].quantity
-}
-
-#[test_only]
-public fun item_location(inventory: &Inventory, type_id: u64): vector<u8> {
-    let item = &inventory.items[&type_id];
-    location::hash(&item.location)
 }
 
 #[test_only]

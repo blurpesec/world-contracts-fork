@@ -166,7 +166,8 @@ fun online_storage_unit(
 }
 
 #[test]
-fun test_teleport_item() {
+#[expected_failure(abort_code = world::location::ENotInProximity)]
+fun test_cannot_teleport_item_across_locations() {
     let mut ts = ts::begin(governor());
     setup_world(&mut ts);
     
@@ -231,7 +232,7 @@ fun test_teleport_item() {
         ts::return_shared(storage_unit_a);
     };
 
-    // Create Storage Unit B
+    // Create Storage Unit B at a different location
     let (storage_b_id, nwn_b_id) = create_storage_unit(
         &mut ts,
         character_id,

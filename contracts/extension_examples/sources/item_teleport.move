@@ -18,7 +18,7 @@ public fun teleport_item(
     ctx: &mut TxContext,
 ) {
     // Withdraw the item from the source storage unit
-    let item = storage_unit::withdraw_item<TeleportAuth>(
+    let (item, item_location) = storage_unit::withdraw_item<TeleportAuth>(
         source_storage_unit,
         character,
         TeleportAuth {},
@@ -31,6 +31,7 @@ public fun teleport_item(
         dest_storage_unit,
         character,
         item,
+        item_location,
         TeleportAuth {},
         ctx,
     );

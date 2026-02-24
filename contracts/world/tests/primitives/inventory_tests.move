@@ -140,7 +140,6 @@ fun mint_ammo(ts: &mut ts::Scenario, character_id: ID) {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             AMMO_QUANTITY,
-            LOCATION_A_HASH,
             ts.ctx(),
         );
         ts::return_shared(storage_unit);
@@ -227,7 +226,6 @@ fun mint_items_increases_quantity_when_exists() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             5u32,
-            LOCATION_A_HASH,
             ts.ctx(),
         );
 
@@ -257,7 +255,6 @@ fun mint_items_increases_quantity_when_exists() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             5u32,
-            LOCATION_A_HASH,
             ts.ctx(),
         );
 
@@ -266,7 +263,6 @@ fun mint_items_increases_quantity_when_exists() {
         assert_eq!(inv_ref.remaining_capacity(), 0);
         assert_eq!(inv_ref.item_quantity(AMMO_TYPE_ID), 10);
         assert_eq!(inv_ref.inventory_item_length(), 1);
-        assert_eq!(inv_ref.item_location(AMMO_TYPE_ID), LOCATION_A_HASH);
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -384,7 +380,6 @@ public fun deposit_item_merges_quantity_when_same_type_id() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             5u32,
-            LOCATION_A_HASH,
             ts.ctx(),
         );
         ts::return_shared(storage_unit);
@@ -416,7 +411,6 @@ public fun deposit_item_merges_quantity_when_same_type_id() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             3u32,
-            LOCATION_A_HASH,
             ts.ctx(),
         );
         ts::return_shared(storage_unit);
@@ -578,7 +572,6 @@ fun burn_items_with_proof() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             AMMO_QUANTITY,
-            x"16217de8ec7330ec3eac32831df5c9cd9b21a255756a5fd5762dd7f49f6cc049",
             ts.ctx(),
         );
         ts::return_shared(storage_unit);
@@ -686,7 +679,6 @@ fun mint_items_fail_empty_type_id() {
             0,
             AMMO_VOLUME,
             AMMO_QUANTITY,
-            LOCATION_A_HASH,
             ts.ctx(),
         );
         ts::return_shared(character);
@@ -727,7 +719,6 @@ fun mint_fail_inventory_insufficient_capacity() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             15u32,
-            LOCATION_A_HASH,
             ts.ctx(),
         );
         ts::return_shared(character);

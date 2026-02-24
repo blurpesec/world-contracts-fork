@@ -8,7 +8,7 @@ use world::{
     energy::EnergyConfig,
     fuel::FuelConfig,
     in_game_id,
-    inventory::Item,
+    inventory::{Self, Item, ItemLocation},
     network_node::{Self, NetworkNode},
     object_registry::ObjectRegistry,
     storage_unit::{Self, StorageUnit},
@@ -63,7 +63,7 @@ public fun swap_ammo_for_lens_extension<T: key>(
     ctx: &mut TxContext,
 ) {
     // Step 1: withdraws lens from storage unit (extension access)
-    let lens = storage_unit.withdraw_item<SwapAuth>(
+    let (lens, lens_location) = storage_unit.withdraw_item<SwapAuth>(
         character,
         SwapAuth {},
         LENS_TYPE_ID,
@@ -73,6 +73,7 @@ public fun swap_ammo_for_lens_extension<T: key>(
     // Step 2: deposits lens to ephemeral storage (owner access)
     storage_unit.deposit_by_owner(
         lens,
+        lens_location,
         character,
         admin_acl,
         owner_cap,
@@ -80,7 +81,7 @@ public fun swap_ammo_for_lens_extension<T: key>(
     );
 
     // Step 3: withdraws item owned by the interactor from their storage (owner access)
-    let ammo = storage_unit.withdraw_by_owner(
+    let (ammo, ammo_location) = storage_unit.withdraw_by_owner(
         character,
         admin_acl,
         owner_cap,
@@ -92,6 +93,7 @@ public fun swap_ammo_for_lens_extension<T: key>(
     storage_unit.deposit_item<SwapAuth>(
         character,
         ammo,
+        ammo_location,
         SwapAuth {},
         ctx,
     );
@@ -618,10 +620,11 @@ fun test_deposit_and_withdraw_via_extension() {
 
     ts::next_tx(&mut ts, user_a());
     let item: Item;
+    let item_location: ItemLocation;
     {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
-        item =
+        (item, item_location) =
             storage_unit.withdraw_item<SwapAuth>(
                 &character,
                 SwapAuth {},
@@ -639,6 +642,7 @@ fun test_deposit_and_withdraw_via_extension() {
         storage_unit.deposit_item<SwapAuth>(
             &character,
             item,
+            item_location,
             SwapAuth {},
             ts.ctx(),
         );
@@ -680,8 +684,9 @@ fun test_deposit_and_withdraw_by_owner() {
 
     ts::next_tx(&mut ts, user_a());
     let item: Item;
+    let item_location: ItemLocation;
     {
-        item =
+        (item, item_location) =
             storage_unit.withdraw_by_owner(
                 &character,
                 &admin_acl,
@@ -695,6 +700,7 @@ fun test_deposit_and_withdraw_by_owner() {
     {
         storage_unit.deposit_by_owner(
             item,
+            item_location,
             &character,
             &admin_acl,
             &owner_cap,
@@ -975,7 +981,7 @@ fun test_withdraw_via_extension_fail_not_authorized() {
     {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
-        let item = storage_unit.withdraw_item<SwapAuth>(
+        let (item, item_location) = storage_unit.withdraw_item<SwapAuth>(
             &character,
             SwapAuth {},
             AMMO_TYPE_ID,
@@ -985,6 +991,7 @@ fun test_withdraw_via_extension_fail_not_authorized() {
         storage_unit.deposit_item<SwapAuth>(
             &character,
             item,
+            item_location,
             SwapAuth {},
             ts.ctx(),
         );
@@ -1020,6 +1027,7 @@ fun test_deposit_via_extension_fail_not_authorized() {
 
     ts::next_tx(&mut ts, user_a());
     let item: Item;
+    let item_location: ItemLocation;
     {
         let (owner_cap, receipt) = character.borrow_owner_cap<StorageUnit>(
             ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id),
@@ -1027,7 +1035,7 @@ fun test_deposit_via_extension_fail_not_authorized() {
         );
         let admin_acl = ts::take_shared<AdminACL>(&ts);
 
-        item =
+        (item, item_location) =
             storage_unit.withdraw_by_owner(
                 &character,
                 &admin_acl,
@@ -1045,6 +1053,7 @@ fun test_deposit_via_extension_fail_not_authorized() {
         storage_unit.deposit_item<SwapAuth>(
             &character,
             item,
+            item_location,
             SwapAuth {},
             ts.ctx(),
         );
@@ -1093,7 +1102,7 @@ fun test_withdraw_by_owner_fail_wrong_owner() {
         );
         let admin_acl = ts::take_shared<AdminACL>(&ts);
 
-        let item = storage_unit.withdraw_by_owner(
+        let (item, item_location) = storage_unit.withdraw_by_owner(
             &character_b,
             &admin_acl,
             &owner_cap,
@@ -1103,6 +1112,7 @@ fun test_withdraw_by_owner_fail_wrong_owner() {
 
         storage_unit.deposit_by_owner(
             item,
+            item_location,
             &character_b,
             &admin_acl,
             &owner_cap,
@@ -1141,6 +1151,7 @@ fun test_deposit_by_owner_fail_wrong_owner() {
     // user_a withdraws item
     ts::next_tx(&mut ts, user_a());
     let item: Item;
+    let item_location: ItemLocation;
     {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
         let mut character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
@@ -1150,7 +1161,7 @@ fun test_deposit_by_owner_fail_wrong_owner() {
         );
         let admin_acl = ts::take_shared<AdminACL>(&ts);
 
-        item =
+        (item, item_location) =
             storage_unit.withdraw_by_owner(
                 &character_a,
                 &admin_acl,
@@ -1184,9 +1195,9 @@ fun test_deposit_by_owner_fail_wrong_owner() {
         );
         let admin_acl = ts::take_shared<AdminACL>(&ts);
 
-        // This should fail with EAssemblyNotAuthorized
         storage_unit.deposit_by_owner(
             item,
+            item_location,
             &character_b,
             &admin_acl,
             &owner_cap,
@@ -1508,6 +1519,7 @@ fun test_deposit_by_owner_fail_tenant_mismatch() {
     // Withdraw item from storage unit B and deposit in different tenant
     ts::next_tx(&mut ts, user_a());
     let item: Item;
+    let item_location: ItemLocation;
     {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_b_id);
         let admin_acl = ts::take_shared<AdminACL>(&ts);
@@ -1516,7 +1528,7 @@ fun test_deposit_by_owner_fail_tenant_mismatch() {
             ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id_diff_tenant),
             ts.ctx(),
         );
-        item =
+        (item, item_location) =
             storage_unit.withdraw_by_owner(
                 &character,
                 &admin_acl,
@@ -1555,6 +1567,7 @@ fun test_deposit_by_owner_fail_tenant_mismatch() {
 
         storage_unit.deposit_by_owner(
             item,
+            item_location,
             &character,
             &admin_acl,
             &owner_cap,
@@ -1603,6 +1616,7 @@ fun test_deposit_via_extension_fail_tenant_mismatch() {
     // Withdraw item from storage unit B
     ts::next_tx(&mut ts, user_a());
     let item: Item;
+    let item_location: ItemLocation;
     {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_b_id);
         let mut character = ts::take_shared_by_id<Character>(&ts, character_id_diff_tenant);
@@ -1611,7 +1625,7 @@ fun test_deposit_via_extension_fail_tenant_mismatch() {
             ts.ctx(),
         );
         let admin_acl = ts::take_shared<AdminACL>(&ts);
-        item =
+        (item, item_location) =
             storage_unit.withdraw_by_owner(
                 &character,
                 &admin_acl,
@@ -1660,6 +1674,7 @@ fun test_deposit_via_extension_fail_tenant_mismatch() {
         storage_unit.deposit_item<SwapAuth>(
             &character,
             item,
+            item_location,
             SwapAuth {},
             ts.ctx(),
         );

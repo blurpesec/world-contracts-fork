@@ -27,7 +27,7 @@ use world::{
     character::Character,
     energy::EnergyConfig,
     in_game_id::{Self, TenantItemId},
-    inventory::{Self, Inventory, Item},
+    inventory::{Self, Inventory, Item, ItemLocation},
     location::{Self, Location},
     metadata::{Self, Metadata},
     network_node::{NetworkNode, OfflineAssemblies, HandleOrphanedAssemblies, UpdateEnergySources},
@@ -175,6 +175,7 @@ public fun deposit_item<Auth: drop>(
     storage_unit: &mut StorageUnit,
     character: &Character,
     item: Item,
+    item_location: ItemLocation,
     _: Auth,
     _: &mut TxContext,
 ) {
@@ -185,6 +186,14 @@ public fun deposit_item<Auth: drop>(
     );
     assert!(storage_unit.status.is_online(), ENotOnline);
     assert!(inventory::tenant(&item) == storage_unit.key.tenant(), ETenantMismatch);
+
+    let (location_type_id, location_hash) = inventory::consume_item_location(item_location);
+    assert!(item.type_id() == location_type_id, ETenantMismatch);
+    location::verify_same_location(
+        storage_unit.location.hash(),
+        location_hash,
+    );
+
     let inventory = df::borrow_mut<ID, Inventory>(
         &mut storage_unit.id,
         storage_unit.owner_cap_id,
@@ -203,7 +212,7 @@ public fun withdraw_item<Auth: drop>(
     _: Auth,
     type_id: u64,
     _: &mut TxContext,
-): Item {
+): (Item, ItemLocation) {
     let storage_unit_id = object::id(storage_unit);
     assert!(
         storage_unit.extension.contains(&type_name::with_defining_ids<Auth>()),
@@ -214,17 +223,20 @@ public fun withdraw_item<Auth: drop>(
         storage_unit.owner_cap_id,
     );
 
-    inventory.withdraw_item(
+    let item = inventory.withdraw_item(
         storage_unit_id,
         storage_unit.key,
         character,
         type_id,
-    )
+    );
+    let item_location = inventory::create_item_location(&item, storage_unit.location.hash());
+    (item, item_location)
 }
 
 public fun deposit_by_owner<T: key>(
     storage_unit: &mut StorageUnit,
     item: Item,
+    item_location: ItemLocation,
     character: &Character,
     admin_acl: &AdminACL,
     owner_cap: &OwnerCap<T>,
@@ -240,10 +252,11 @@ public fun deposit_by_owner<T: key>(
     check_inventory_authorization(owner_cap, storage_unit, character.id());
     assert!(inventory::tenant(&item) == storage_unit.key.tenant(), ETenantMismatch);
 
-    // This check is only required for ephemeral inventory
+    let (location_type_id, location_hash) = inventory::consume_item_location(item_location);
+    assert!(item.type_id() == location_type_id, ETenantMismatch);
     location::verify_same_location(
         storage_unit.location.hash(),
-        item.get_item_location_hash(),
+        location_hash,
     );
 
     let inventory = df::borrow_mut<ID, Inventory>(
@@ -266,7 +279,7 @@ public fun withdraw_by_owner<T: key>(
     owner_cap: &OwnerCap<T>,
     type_id: u64,
     ctx: &mut TxContext,
-): Item {
+): (Item, ItemLocation) {
     // TODO: Add proximity_proof verification when location service is available.
     // Until then, admin_acl is used to verify via sponsored transaction.
     admin_acl.verify_sponsor(ctx);
@@ -281,12 +294,14 @@ public fun withdraw_by_owner<T: key>(
         owner_cap_id,
     );
 
-    inventory.withdraw_item(
+    let item = inventory.withdraw_item(
         storage_unit_id,
         storage_unit.key,
         character,
         type_id,
-    )
+    );
+    let item_location = inventory::create_item_location(&item, storage_unit.location.hash());
+    (item, item_location)
 }
 
 // TODO: Can also have a transfer function for simplicity
@@ -600,7 +615,6 @@ public fun game_item_to_chain_inventory<T: key>(
         type_id,
         volume,
         quantity,
-        storage_unit.location.hash(),
         ctx,
     )
 }
@@ -781,7 +795,6 @@ public fun game_item_to_chain_inventory_test<T: key>(
         type_id,
         volume,
         quantity,
-        storage_unit.location.hash(),
         ctx,
     )
 }

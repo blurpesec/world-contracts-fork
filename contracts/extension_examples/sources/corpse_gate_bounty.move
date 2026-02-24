@@ -52,7 +52,7 @@ public fun collect_corpse_bounty<T: key>(
     >(BountyConfigKey {});
 
     // Withdraw the corpse from the player's inventory (owner-authorized).
-    let corpse = storage_unit.withdraw_by_owner<T>(
+    let (corpse, corpse_location) = storage_unit.withdraw_by_owner<T>(
         character,
         admin_acl,
         player_inventory_owner_cap,
@@ -60,12 +60,12 @@ public fun collect_corpse_bounty<T: key>(
         ctx,
     );
 
-    // Check if the corpse is of the correct type.
     assert!(corpse.type_id() == bounty_cfg.bounty_type_id, ECorpseTypeMismatch);
 
     storage_unit.deposit_item<XAuth>(
         character,
         corpse,
+        corpse_location,
         config::x_auth(),
         ctx,
     );
