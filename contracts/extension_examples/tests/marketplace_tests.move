@@ -14,8 +14,9 @@ use world::{
 };
 use extension_examples::marketplace::{Self, MarketAuth};
 
-const CHARACTER_A_ITEM_ID: u32 = 1234u32;
-const CHARACTER_B_ITEM_ID: u32 = 5678u32;
+const OWNER_ITEM_ID: u32 = 1000u32;
+const SELLER_ITEM_ID: u32 = 1234u32;
+const BUYER_ITEM_ID: u32 = 5678u32;
 const LOCATION_HASH: vector<u8> = x"7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b";
 const MAX_CAPACITY: u64 = 100000;
 const STORAGE_TYPE_ID: u64 = 5555;
@@ -42,8 +43,9 @@ const FUEL_VOLUME: u64 = 10;
 
 fun governor(): address { @0xA }
 fun admin(): address { @0xB }
-fun seller(): address { @0xC }
-fun buyer(): address { @0xD }
+fun owner(): address { @0xC }
+fun seller(): address { @0xD }
+fun buyer(): address { @0xE }
 
 fun setup_world(ts: &mut ts::Scenario) {
     world::test_helpers::setup_world(ts);
@@ -173,47 +175,57 @@ fun online_storage_unit(
     clock.destroy_for_testing();
 }
 
-/// Async marketplace test:
-/// - Seller (User A) owns the SSU, stocks Lens in main inventory, authorizes MarketAuth
-/// - Buyer (User B) has Ammo in ephemeral inventory
-/// - Buyer calls buy_item: gets Lens, Seller gets Ammo (seller is offline)
+/// Async marketplace test with three independent players:
+/// - Owner: creates and onlines the SSU, authorizes MarketAuth (never trades)
+/// - Seller: has Lens in ephemeral, lists them for sale, then goes offline
+/// - Buyer: has Ammo in ephemeral, buys Lens while seller is offline
 #[test]
 fun test_async_marketplace_trade() {
     let mut ts = ts::begin(governor());
     setup_world(&mut ts);
 
-    let seller_id = create_character(&mut ts, seller(), CHARACTER_A_ITEM_ID);
-    let buyer_id = create_character(&mut ts, buyer(), CHARACTER_B_ITEM_ID);
+    let owner_id = create_character(&mut ts, owner(), OWNER_ITEM_ID);
+    let seller_id = create_character(&mut ts, seller(), SELLER_ITEM_ID);
+    let buyer_id = create_character(&mut ts, buyer(), BUYER_ITEM_ID);
 
-    // Seller creates and onlines their storage unit
-    let (storage_id, nwn_id) = create_storage_unit(&mut ts, seller_id);
-    online_storage_unit(&mut ts, seller(), seller_id, storage_id, nwn_id);
+    // Owner creates, onlines, and authorizes MarketAuth on the storage unit
+    let (storage_id, nwn_id) = create_storage_unit(&mut ts, owner_id);
+    online_storage_unit(&mut ts, owner(), owner_id, storage_id, nwn_id);
 
-    // Seller: mint Lens into main inventory (SSU owner's inventory) and authorize MarketAuth
-    ts::next_tx(&mut ts, seller());
+    ts::next_tx(&mut ts, owner());
     {
-        let mut character = ts::take_shared_by_id<Character>(&ts, seller_id);
+        let mut character = ts::take_shared_by_id<Character>(&ts, owner_id);
         let (owner_cap, receipt) = character.borrow_owner_cap<StorageUnit>(
-            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&seller_id),
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&owner_id),
             ts.ctx(),
         );
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
-        storage_unit.game_item_to_chain_inventory_test<StorageUnit>(
-            &character,
-            &owner_cap,
-            LENS_ITEM_ID,
-            LENS_TYPE_ID,
-            LENS_VOLUME,
-            LENS_QUANTITY,
-            ts.ctx(),
-        );
         storage_unit.authorize_extension<MarketAuth>(&owner_cap);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
         ts::return_shared(storage_unit);
     };
 
-    // Buyer: mint Ammo into their ephemeral inventory (using Character OwnerCap)
+    // Seller: mint Lens into their ephemeral inventory (using Character OwnerCap)
+    ts::next_tx(&mut ts, seller());
+    {
+        let mut character = ts::take_shared_by_id<Character>(&ts, seller_id);
+        let (owner_cap, receipt) = character.borrow_owner_cap<Character>(
+            ts::most_recent_receiving_ticket<OwnerCap<Character>>(&seller_id),
+            ts.ctx(),
+        );
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        storage_unit.game_item_to_chain_inventory_test<Character>(
+            &character, &owner_cap,
+            LENS_ITEM_ID, LENS_TYPE_ID, LENS_VOLUME, LENS_QUANTITY,
+            ts.ctx(),
+        );
+        character.return_owner_cap(owner_cap, receipt);
+        ts::return_shared(character);
+        ts::return_shared(storage_unit);
+    };
+
+    // Buyer: mint Ammo into their ephemeral inventory
     ts::next_tx(&mut ts, buyer());
     {
         let mut character = ts::take_shared_by_id<Character>(&ts, buyer_id);
@@ -223,12 +235,8 @@ fun test_async_marketplace_trade() {
         );
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
         storage_unit.game_item_to_chain_inventory_test<Character>(
-            &character,
-            &owner_cap,
-            AMMO_ITEM_ID,
-            AMMO_TYPE_ID,
-            AMMO_VOLUME,
-            AMMO_QUANTITY,
+            &character, &owner_cap,
+            AMMO_ITEM_ID, AMMO_TYPE_ID, AMMO_VOLUME, AMMO_QUANTITY,
             ts.ctx(),
         );
         character.return_owner_cap(owner_cap, receipt);
@@ -236,60 +244,71 @@ fun test_async_marketplace_trade() {
         ts::return_shared(storage_unit);
     };
 
-    // Get seller's Character OwnerCap ID (for deposit_to_owned target)
+    // Resolve OwnerCap IDs for assertions and the buy_item call
     let seller_owner_cap_id = {
         ts::next_tx(&mut ts, admin());
-        let character = ts::take_shared_by_id<Character>(&ts, seller_id);
-        let id = character.owner_cap_id();
-        ts::return_shared(character);
+        let c = ts::take_shared_by_id<Character>(&ts, seller_id);
+        let id = c.owner_cap_id();
+        ts::return_shared(c);
         id
     };
-
-    // Get the storage unit's owner_cap_id (main inventory key) for assertions
-    let storage_owner_cap_id = {
-        ts::next_tx(&mut ts, admin());
-        let storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
-        let id = storage_unit.owner_cap_id();
-        ts::return_shared(storage_unit);
-        id
-    };
-
-    // Get buyer's Character OwnerCap ID for assertions
     let buyer_owner_cap_id = {
         ts::next_tx(&mut ts, admin());
-        let character = ts::take_shared_by_id<Character>(&ts, buyer_id);
-        let id = character.owner_cap_id();
-        ts::return_shared(character);
+        let c = ts::take_shared_by_id<Character>(&ts, buyer_id);
+        let id = c.owner_cap_id();
+        ts::return_shared(c);
+        id
+    };
+    let storage_owner_cap_id = {
+        ts::next_tx(&mut ts, admin());
+        let su = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let id = su.owner_cap_id();
+        ts::return_shared(su);
         id
     };
 
-    // Before trade assertions
+    // Seller lists Lens (moves from ephemeral -> main)
+    ts::next_tx(&mut ts, seller());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut seller_char = ts::take_shared_by_id<Character>(&ts, seller_id);
+        let (owner_cap, receipt) = seller_char.borrow_owner_cap<Character>(
+            ts::most_recent_receiving_ticket<OwnerCap<Character>>(&seller_id),
+            ts.ctx(),
+        );
+
+        marketplace::list_item(
+            &mut storage_unit, &seller_char, &owner_cap, LENS_TYPE_ID, ts.ctx(),
+        );
+
+        seller_char.return_owner_cap(owner_cap, receipt);
+        ts::return_shared(seller_char);
+        ts::return_shared(storage_unit);
+    };
+
+    // Assert: Lens moved from seller's ephemeral to main
     ts::next_tx(&mut ts, admin());
     {
-        let storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
-        // Main inventory has Lens
-        assert_eq!(storage_unit.item_quantity(storage_owner_cap_id, LENS_TYPE_ID), LENS_QUANTITY);
-        assert!(!storage_unit.contains_item(storage_owner_cap_id, AMMO_TYPE_ID));
-        // Buyer ephemeral has Ammo
-        assert_eq!(storage_unit.item_quantity(buyer_owner_cap_id, AMMO_TYPE_ID), AMMO_QUANTITY);
-        assert!(!storage_unit.contains_item(buyer_owner_cap_id, LENS_TYPE_ID));
-        // Seller has no ephemeral inventory yet
-        assert!(!storage_unit.has_inventory(seller_owner_cap_id));
-        ts::return_shared(storage_unit);
+        let su = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        assert_eq!(su.item_quantity(storage_owner_cap_id, LENS_TYPE_ID), LENS_QUANTITY);
+        assert!(!su.contains_item(seller_owner_cap_id, LENS_TYPE_ID));
+        assert_eq!(su.item_quantity(buyer_owner_cap_id, AMMO_TYPE_ID), AMMO_QUANTITY);
+        ts::return_shared(su);
     };
 
     // Buyer executes the trade (seller is offline!)
     ts::next_tx(&mut ts, buyer());
     {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
-        let mut buyer_character = ts::take_shared_by_id<Character>(&ts, buyer_id);
-        let (owner_cap, receipt) = buyer_character.borrow_owner_cap<Character>(
+        let mut buyer_char = ts::take_shared_by_id<Character>(&ts, buyer_id);
+        let (owner_cap, receipt) = buyer_char.borrow_owner_cap<Character>(
             ts::most_recent_receiving_ticket<OwnerCap<Character>>(&buyer_id),
             ts.ctx(),
         );
+
         marketplace::buy_item(
             &mut storage_unit,
-            &buyer_character,
+            &buyer_char,
             seller_owner_cap_id,
             &owner_cap,
             LENS_TYPE_ID,
@@ -297,29 +316,29 @@ fun test_async_marketplace_trade() {
             ts.ctx(),
         );
 
-        buyer_character.return_owner_cap(owner_cap, receipt);
-        ts::return_shared(buyer_character);
+        buyer_char.return_owner_cap(owner_cap, receipt);
+        ts::return_shared(buyer_char);
         ts::return_shared(storage_unit);
     };
 
     // After trade assertions
     ts::next_tx(&mut ts, admin());
     {
-        let storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let su = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
 
-        // Main inventory: empty (Lens was sold)
-        assert!(!storage_unit.contains_item(storage_owner_cap_id, LENS_TYPE_ID));
-        assert!(!storage_unit.contains_item(storage_owner_cap_id, AMMO_TYPE_ID));
+        // Main inventory: empty
+        assert!(!su.contains_item(storage_owner_cap_id, LENS_TYPE_ID));
+        assert!(!su.contains_item(storage_owner_cap_id, AMMO_TYPE_ID));
 
         // Buyer's ephemeral: has Lens, no more Ammo
-        assert_eq!(storage_unit.item_quantity(buyer_owner_cap_id, LENS_TYPE_ID), LENS_QUANTITY);
-        assert!(!storage_unit.contains_item(buyer_owner_cap_id, AMMO_TYPE_ID));
+        assert_eq!(su.item_quantity(buyer_owner_cap_id, LENS_TYPE_ID), LENS_QUANTITY);
+        assert!(!su.contains_item(buyer_owner_cap_id, AMMO_TYPE_ID));
 
-        // Seller's ephemeral: has Ammo (created automatically by deposit_to_owned)
-        assert!(storage_unit.has_inventory(seller_owner_cap_id));
-        assert_eq!(storage_unit.item_quantity(seller_owner_cap_id, AMMO_TYPE_ID), AMMO_QUANTITY);
+        // Seller's ephemeral: has Ammo (payment received while offline)
+        assert_eq!(su.item_quantity(seller_owner_cap_id, AMMO_TYPE_ID), AMMO_QUANTITY);
+        assert!(!su.contains_item(seller_owner_cap_id, LENS_TYPE_ID));
 
-        ts::return_shared(storage_unit);
+        ts::return_shared(su);
     };
 
     ts::end(ts);

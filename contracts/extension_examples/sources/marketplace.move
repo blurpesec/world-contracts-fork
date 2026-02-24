@@ -1,15 +1,18 @@
-/// Simple marketplace extension demonstrating `deposit_to_owned` and `withdraw_from_owned`.
+/// Simple marketplace extension demonstrating `withdraw_from_owned`, `deposit_to_owned`,
+/// `withdraw_item`, and `deposit_item`.
+///
+/// Any player with an ephemeral inventory on the storage unit can trade.
+/// The SSU owner's only role is authorizing MarketAuth.
 ///
 /// Flow:
-/// 1. Seller (SSU owner) places items in the main inventory and authorizes MarketAuth.
-/// 2. Buyer calls `buy_item`, providing their payment from ephemeral storage.
-///    The extension:
-///    - Withdraws the listed item from main inventory
-///    - Withdraws the buyer's payment from their ephemeral inventory
-///    - Deposits the payment into the seller's ephemeral inventory (async, seller can be offline)
-///    - Deposits the purchased item into the buyer's ephemeral inventory
+/// 1. Seller calls `list_item` to move an item from their ephemeral into main inventory.
+/// 2. Buyer calls `buy_item` (seller can be offline):
+///    - Withdraws the listed item from main
+///    - Withdraws the buyer's payment from their ephemeral
+///    - Deposits the payment into the seller's ephemeral
+///    - Deposits the purchased item into the buyer's ephemeral
 ///
-/// No AdminACL required — fully usable by external (non-operator-sponsored) extensions.
+/// No AdminACL required -- fully usable by external (non-operator-sponsored) extensions.
 module extension_examples::marketplace;
 
 use world::{
@@ -22,9 +25,33 @@ public struct MarketAuth has drop {}
 
 public fun market_auth(): MarketAuth { MarketAuth {} }
 
-/// Buyer purchases an item from the main inventory.
-/// `seller_owner_cap_id` is the Character OwnerCap ID of the seller
-/// so the extension can push the payment into the seller's ephemeral inventory.
+/// Seller lists an item by moving it from their ephemeral inventory into main.
+public fun list_item<T: key>(
+    storage_unit: &mut StorageUnit,
+    seller_character: &Character,
+    seller_owner_cap: &OwnerCap<T>,
+    type_id: u64,
+    ctx: &mut TxContext,
+) {
+    let (item, item_location) = storage_unit.withdraw_from_owned<MarketAuth, T>(
+        seller_character,
+        seller_owner_cap,
+        MarketAuth {},
+        type_id,
+        ctx,
+    );
+
+    storage_unit.deposit_item<MarketAuth>(
+        seller_character,
+        item,
+        item_location,
+        MarketAuth {},
+        ctx,
+    );
+}
+
+/// Buyer purchases a listed item from main inventory.
+/// `seller_owner_cap_id` identifies the seller's ephemeral inventory for payment delivery.
 public fun buy_item<T: key>(
     storage_unit: &mut StorageUnit,
     buyer_character: &Character,
@@ -34,7 +61,6 @@ public fun buy_item<T: key>(
     payment_type_id: u64,
     ctx: &mut TxContext,
 ) {
-    // 1. Withdraw the listed item from main inventory (extension access)
     let (listed_item, listed_location) = storage_unit.withdraw_item<MarketAuth>(
         buyer_character,
         MarketAuth {},
@@ -42,7 +68,6 @@ public fun buy_item<T: key>(
         ctx,
     );
 
-    // 2. Withdraw buyer's payment from their ephemeral inventory (owner + extension access)
     let (payment, payment_location) = storage_unit.withdraw_from_owned<MarketAuth, T>(
         buyer_character,
         buyer_owner_cap,
@@ -51,7 +76,6 @@ public fun buy_item<T: key>(
         ctx,
     );
 
-    // 3. Deposit payment into seller's ephemeral inventory (seller can be offline)
     storage_unit.deposit_to_owned<MarketAuth>(
         buyer_character,
         seller_owner_cap_id,
@@ -61,7 +85,6 @@ public fun buy_item<T: key>(
         ctx,
     );
 
-    // 4. Deposit purchased item into buyer's ephemeral inventory
     let buyer_owner_cap_id = object::id(buyer_owner_cap);
     storage_unit.deposit_to_owned<MarketAuth>(
         buyer_character,

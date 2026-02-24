@@ -32,6 +32,11 @@ fun init(ctx: &mut TxContext) {
     transfer::share_object(config);
 }
 
+#[test_only]
+public fun init_for_testing(ctx: &mut TxContext) {
+    init(ctx);
+}
+
 // === Dynamic field helpers ===
 //
 // These helpers let other modules attach their own config structs as dynamic fields

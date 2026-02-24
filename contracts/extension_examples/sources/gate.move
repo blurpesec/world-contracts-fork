@@ -15,19 +15,15 @@
 module extension_examples::gate;
 
 use sui::clock::Clock;
+use extension_examples::config::{Self, XAuth};
 use world::{
     character::Character,
     gate::{Self, Gate},
-    storage_unit::{Self as storage_unit, StorageUnit}
 };
 
 // === Errors ===
 #[error(code = 0)]
 const ENotStarterTribe: vector<u8> = b"Character is not a starter tribe";
-
-// This can be any type that is authorized to call the `issue_jump_permit` function.
-// eg: AlgorithimicWarfareAuth, TribalAuth, GoonCorpAuth, etc.
-public struct XAuth has drop {}
 
 // Can add more rules
 public struct GateRules has key {
@@ -61,7 +57,7 @@ public fun issue_jump_permit(
         source_gate,
         destination_gate,
         character,
-        XAuth {},
+        config::x_auth(),
         expires_at_timestamp_ms,
         ctx,
     );
@@ -83,4 +79,9 @@ fun init(ctx: &mut TxContext) {
     transfer::transfer(admin_cap, ctx.sender());
 
     transfer::share_object(GateRules { id: object::new(ctx), tribe: 0 });
+}
+
+#[test_only]
+public fun init_for_testing(ctx: &mut TxContext) {
+    init(ctx);
 }
