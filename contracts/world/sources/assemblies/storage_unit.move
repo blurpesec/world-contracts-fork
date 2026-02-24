@@ -5,13 +5,19 @@
 /// The behaviour of a Storage Unit can be customized by registering a custom contract
 /// using the typed witness pattern. https://github.com/evefrontier/world-contracts/blob/main/docs/architechture.md#layer-3-player-extensions-moddability
 ///
-/// Storage Units support two access modes to enable player-to-player interactions:
+/// Storage Units support three access modes to enable player-to-player interactions:
 ///
-/// 1. **Extension-based access** (Primary):
+/// 1. **Extension-based access** (Main inventory):
 ///    - Functions: `deposit_item<Auth>`, `withdraw_item<Auth>`
 ///    - Allows 3rd party contracts to handle inventory operations on behalf of the owner
 ///
-/// 2. **Owner-direct access** (Temporary / Ephemeral Storage)
+/// 2. **Extension-to-owned access** (Main -> Ephemeral):
+///    - Function: `deposit_to_owned<Auth>`
+///    - Allows extensions to push items into a player's ephemeral inventory
+///    - Target player does NOT need to be the transaction sender
+///    - Enables async trading, guild hangars, automated rewards
+///
+/// 3. **Owner-direct access** (Ephemeral Storage)
 ///    - Functions: `deposit_by_owner`, `withdraw_by_owner`
 ///    - Allows the owner to handle inventory operations
 ///    - Will be deprecated once the Ship inventory module is implemented
@@ -221,6 +227,92 @@ public fun withdraw_item<Auth: drop>(
     let inventory = df::borrow_mut<ID, Inventory>(
         &mut storage_unit.id,
         storage_unit.owner_cap_id,
+    );
+
+    let item = inventory.withdraw_item(
+        storage_unit_id,
+        storage_unit.key,
+        character,
+        type_id,
+    );
+    let item_location = inventory::create_item_location(&item, storage_unit.location.hash());
+    (item, item_location)
+}
+
+/// Extension-authorized deposit into a player's ephemeral inventory.
+/// Unlike `deposit_by_owner`, the target player does NOT need to be the transaction sender.
+/// The ephemeral inventory is identified by `owner_cap_id` (the Character's OwnerCap ID).
+/// Creates the ephemeral inventory if it doesn't exist yet.
+public fun deposit_to_owned<Auth: drop>(
+    storage_unit: &mut StorageUnit,
+    character: &Character,
+    owner_cap_id: ID,
+    item: Item,
+    item_location: ItemLocation,
+    _: Auth,
+    _: &mut TxContext,
+) {
+    let storage_unit_id = object::id(storage_unit);
+    assert!(
+        storage_unit.extension.contains(&type_name::with_defining_ids<Auth>()),
+        EExtensionNotAuthorized,
+    );
+    assert!(storage_unit.status.is_online(), ENotOnline);
+    assert!(inventory::tenant(&item) == storage_unit.key.tenant(), ETenantMismatch);
+
+    let (location_type_id, location_hash) = inventory::consume_item_location(item_location);
+    assert!(item.type_id() == location_type_id, ETenantMismatch);
+    location::verify_same_location(
+        storage_unit.location.hash(),
+        location_hash,
+    );
+
+    if (!df::exists_(&storage_unit.id, owner_cap_id)) {
+        let owner_inv = df::borrow<ID, Inventory>(
+            &storage_unit.id,
+            storage_unit.owner_cap_id,
+        );
+        let eph_inventory = inventory::create(owner_inv.max_capacity());
+        storage_unit.inventory_keys.push_back(owner_cap_id);
+        df::add(&mut storage_unit.id, owner_cap_id, eph_inventory);
+    };
+
+    let inventory = df::borrow_mut<ID, Inventory>(
+        &mut storage_unit.id,
+        owner_cap_id,
+    );
+    inventory.deposit_item(
+        storage_unit_id,
+        storage_unit.key,
+        character,
+        item,
+    );
+}
+
+/// Extension-authorized withdrawal from a player's ephemeral inventory.
+/// The caller MUST hold the OwnerCap and be the character's address (same security as withdraw_by_owner).
+/// Does NOT require AdminACL, making it usable by external (non-operator-sponsored) extensions.
+public fun withdraw_from_owned<Auth: drop, T: key>(
+    storage_unit: &mut StorageUnit,
+    character: &Character,
+    owner_cap: &OwnerCap<T>,
+    _: Auth,
+    type_id: u64,
+    ctx: &mut TxContext,
+): (Item, ItemLocation) {
+    assert!(character.character_address() == ctx.sender(), ESenderCannotAccessCharacter);
+    let storage_unit_id = object::id(storage_unit);
+    let owner_cap_id = object::id(owner_cap);
+    assert!(storage_unit.status.is_online(), ENotOnline);
+    assert!(
+        storage_unit.extension.contains(&type_name::with_defining_ids<Auth>()),
+        EExtensionNotAuthorized,
+    );
+    check_inventory_authorization(owner_cap, storage_unit, character.id());
+
+    let inventory = df::borrow_mut<ID, Inventory>(
+        &mut storage_unit.id,
+        owner_cap_id,
     );
 
     let item = inventory.withdraw_item(
