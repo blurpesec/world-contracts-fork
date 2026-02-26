@@ -185,6 +185,10 @@ public fun deposit_item<Auth: drop>(
     );
     assert!(storage_unit.status.is_online(), ENotOnline);
     assert!(inventory::tenant(&item) == storage_unit.key.tenant(), ETenantMismatch);
+    location::verify_same_location(
+        storage_unit.location.hash(),
+        item.get_item_location_hash(),
+    );
     let inventory = df::borrow_mut<ID, Inventory>(
         &mut storage_unit.id,
         storage_unit.owner_cap_id,
@@ -202,7 +206,8 @@ public fun withdraw_item<Auth: drop>(
     character: &Character,
     _: Auth,
     type_id: u64,
-    _: &mut TxContext,
+    quantity: u32,
+    ctx: &mut TxContext,
 ): Item {
     let storage_unit_id = object::id(storage_unit);
     assert!(
@@ -219,6 +224,8 @@ public fun withdraw_item<Auth: drop>(
         storage_unit.key,
         character,
         type_id,
+        quantity,
+        ctx,
     )
 }
 
@@ -265,6 +272,7 @@ public fun withdraw_by_owner<T: key>(
     admin_acl: &AdminACL,
     owner_cap: &OwnerCap<T>,
     type_id: u64,
+    quantity: u32,
     ctx: &mut TxContext,
 ): Item {
     // TODO: Add proximity_proof verification when location service is available.
@@ -286,6 +294,8 @@ public fun withdraw_by_owner<T: key>(
         storage_unit.key,
         character,
         type_id,
+        quantity,
+        ctx,
     )
 }
 
@@ -601,7 +611,6 @@ public fun game_item_to_chain_inventory<T: key>(
         volume,
         quantity,
         storage_unit.location.hash(),
-        ctx,
     )
 }
 
@@ -782,6 +791,5 @@ public fun game_item_to_chain_inventory_test<T: key>(
         volume,
         quantity,
         storage_unit.location.hash(),
-        ctx,
     )
 }
