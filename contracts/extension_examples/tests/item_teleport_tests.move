@@ -1,6 +1,7 @@
 #[test_only]
 module extension_examples::item_teleport_tests;
 
+use extension_examples::item_teleport::{Self, TeleportAuth};
 use std::string::utf8;
 use sui::{clock, test_scenario as ts};
 use world::{
@@ -9,13 +10,14 @@ use world::{
     energy::EnergyConfig,
     network_node::{Self, NetworkNode},
     object_registry::ObjectRegistry,
-    storage_unit::{Self, StorageUnit},
+    storage_unit::{Self, StorageUnit}
 };
-use extension_examples::item_teleport::{Self, TeleportAuth};
 
 const CHARACTER_A_ITEM_ID: u32 = 1234u32;
-const LOCATION_A_HASH: vector<u8> = x"7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b";
-const LOCATION_B_HASH: vector<u8> = x"8b9f3b2e9c4d1a6f5e8b2d9c3f7a1e5b7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5c";
+const LOCATION_A_HASH: vector<u8> =
+    x"7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5b";
+const LOCATION_B_HASH: vector<u8> =
+    x"8b9f3b2e9c4d1a6f5e8b2d9c3f7a1e5b7a8f3b2e9c4d1a6f5e8b2d9c3f7a1e5c";
 const MAX_CAPACITY: u64 = 100000;
 const STORAGE_A_TYPE_ID: u64 = 5555;
 const STORAGE_A_ITEM_ID: u64 = 90002;
@@ -37,7 +39,9 @@ const FUEL_TYPE_ID: u64 = 1;
 const FUEL_VOLUME: u64 = 10;
 
 fun governor(): address { @0xA }
+
 fun admin(): address { @0xB }
+
 fun user_a(): address { @0xC }
 
 fun setup_world(ts: &mut ts::Scenario) {
@@ -170,7 +174,7 @@ fun online_storage_unit(
 fun test_cannot_teleport_item_across_locations() {
     let mut ts = ts::begin(governor());
     setup_world(&mut ts);
-    
+
     // Create Character
     ts::next_tx(&mut ts, admin());
     let character_id = {
@@ -213,7 +217,7 @@ fun test_cannot_teleport_item_across_locations() {
             ts.ctx(),
         );
         let mut storage_unit_a = ts::take_shared_by_id<StorageUnit>(&ts, storage_a_id);
-        
+
         storage_unit_a.game_item_to_chain_inventory_test<StorageUnit>(
             &character,
             &owner_cap,
@@ -223,10 +227,10 @@ fun test_cannot_teleport_item_across_locations() {
             AMMO_QUANTITY,
             ts.ctx(),
         );
-        
+
         // Approve Auth witness
         storage_unit_a.authorize_extension<TeleportAuth>(&owner_cap);
-        
+
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
         ts::return_shared(storage_unit_a);
@@ -252,9 +256,9 @@ fun test_cannot_teleport_item_across_locations() {
             ts.ctx(),
         );
         let mut storage_unit_b = ts::take_shared_by_id<StorageUnit>(&ts, storage_b_id);
-        
+
         storage_unit_b.authorize_extension<TeleportAuth>(&owner_cap);
-        
+
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
         ts::return_shared(storage_unit_b);
@@ -266,15 +270,15 @@ fun test_cannot_teleport_item_across_locations() {
         let mut storage_unit_a = ts::take_shared_by_id<StorageUnit>(&ts, storage_a_id);
         let mut storage_unit_b = ts::take_shared_by_id<StorageUnit>(&ts, storage_b_id);
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
-        
+
         item_teleport::teleport_item(
             &mut storage_unit_a,
             &mut storage_unit_b,
             &character,
             AMMO_TYPE_ID,
-            ts.ctx()
+            ts.ctx(),
         );
-        
+
         ts::return_shared(character);
         ts::return_shared(storage_unit_a);
         ts::return_shared(storage_unit_b);

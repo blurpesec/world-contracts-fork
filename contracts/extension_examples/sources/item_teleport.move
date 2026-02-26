@@ -1,7 +1,6 @@
 module extension_examples::item_teleport;
 
-use world::character::Character;
-use world::storage_unit::{Self, StorageUnit};
+use world::{character::Character, storage_unit::{Self, StorageUnit}};
 
 /// Authorized extension witness type for item teleportation.
 public struct TeleportAuth has drop {}
