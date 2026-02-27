@@ -59,7 +59,6 @@ public fun swap_ammo_for_lens_extension<T: key>(
     storage_unit: &mut StorageUnit,
     owner_cap: &OwnerCap<T>,
     character: &Character,
-    admin_acl: &AdminACL,
     ctx: &mut TxContext,
 ) {
     // Step 1: withdraws lens from storage unit (extension access)
@@ -71,11 +70,10 @@ public fun swap_ammo_for_lens_extension<T: key>(
         ctx,
     );
 
-    // Step 2: deposits lens to ephemeral storage (owner access)
+    // Step 2: deposits lens to owned inventory (owner access)
     storage_unit.deposit_by_owner(
         lens,
         character,
-        admin_acl,
         owner_cap,
         ctx,
     );
@@ -83,7 +81,6 @@ public fun swap_ammo_for_lens_extension<T: key>(
     // Step 3: withdraws item owned by the interactor from their storage (owner access)
     let ammo = storage_unit.withdraw_by_owner(
         character,
-        admin_acl,
         owner_cap,
         AMMO_TYPE_ID,
         AMMO_QUANTITY,
@@ -91,6 +88,49 @@ public fun swap_ammo_for_lens_extension<T: key>(
     );
 
     // Step 4: deposits the item from Step 3 to storage unit (extension access)
+    storage_unit.deposit_item<SwapAuth>(
+        character,
+        ammo,
+        SwapAuth {},
+        ctx,
+    );
+}
+
+/// Mock swap using deposit_to_owned for the deposit side and withdraw_by_owner for the withdrawal.
+/// No AdminACL needed anywhere in the flow.
+public fun swap_ammo_for_lens_via_extension<T: key>(
+    storage_unit: &mut StorageUnit,
+    owner_cap: &OwnerCap<T>,
+    character: &Character,
+    ctx: &mut TxContext,
+) {
+    // Step 1: withdraw lens from main inventory (extension access)
+    let lens = storage_unit.withdraw_item<SwapAuth>(
+        character,
+        SwapAuth {},
+        LENS_TYPE_ID,
+        LENS_QUANTITY,
+        ctx,
+    );
+
+    // Step 2: deposit lens into player's owned inventory (extension-to-owned)
+    storage_unit.deposit_to_owned<SwapAuth>(
+        character,
+        lens,
+        SwapAuth {},
+        ctx,
+    );
+
+    // Step 3: withdraw ammo from player's owned inventory (owner access, no AdminACL)
+    let ammo = storage_unit.withdraw_by_owner(
+        character,
+        owner_cap,
+        AMMO_TYPE_ID,
+        AMMO_QUANTITY,
+        ctx,
+    );
+
+    // Step 4: deposit ammo into main inventory (extension access)
     storage_unit.deposit_item<SwapAuth>(
         character,
         ammo,
@@ -323,7 +363,7 @@ fun create_character_with_tenant(
     character_id
 }
 
-// Character Owner Caps for Ephemeral Inventory interaction
+// Character Owner Caps for owned inventory interaction
 fun character_owner_cap_id(ts: &mut ts::Scenario, character_id: ID): ID {
     ts::next_tx(ts, admin());
     let character = ts::take_shared_by_id<Character>(ts, character_id);
@@ -483,13 +523,13 @@ fun test_game_item_to_chain_and_chain_item_to_game_inventory() {
     ts::end(ts);
 }
 
-/// Test adding items twice in the ephemeral inventory
+/// Test adding items twice in the owned inventory
 /// Scenario: User A mints lens on-chain by game_item_to_chain_inventory()
 /// User B mints lens on-chain by game_item_to_chain_inventory()
 /// User B mints ammo on-chain
-/// Expected: ephemeral inventory should only created once
+/// Expected: owned inventory should only be created once
 #[test]
-fun test_mint_multiple_items_in_ephemeral_inventory() {
+fun test_mint_multiple_items_in_owned_inventory() {
     let mut ts = ts::begin(governor());
     setup_nwn(&mut ts);
     let character_a_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
@@ -518,7 +558,7 @@ fun test_mint_multiple_items_in_ephemeral_inventory() {
         ts::return_shared(storage_unit);
     };
 
-    // Create a character owner cap as a biometric to mint items in ephemeral inventory
+    // Create a character owner cap as a biometric to mint items in owned inventory
     let character_owner_cap_id = character_owner_cap_id(&mut ts, character_b_id);
 
     // Mint lens for user B
@@ -674,7 +714,6 @@ fun test_deposit_and_withdraw_by_owner() {
 
     ts::next_tx(&mut ts, user_a());
     let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
-    let admin_acl = ts::take_shared<AdminACL>(&ts);
     let mut character = ts::take_shared_by_id<Character>(&ts, character_id);
     let (owner_cap, receipt) = character.borrow_owner_cap<StorageUnit>(
         ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id),
@@ -687,7 +726,6 @@ fun test_deposit_and_withdraw_by_owner() {
         item =
             storage_unit.withdraw_by_owner(
                 &character,
-                &admin_acl,
                 &owner_cap,
                 AMMO_TYPE_ID,
                 AMMO_QUANTITY,
@@ -700,7 +738,6 @@ fun test_deposit_and_withdraw_by_owner() {
         storage_unit.deposit_by_owner(
             item,
             &character,
-            &admin_acl,
             &owner_cap,
             ts.ctx(),
         );
@@ -708,7 +745,6 @@ fun test_deposit_and_withdraw_by_owner() {
     };
     character.return_owner_cap(owner_cap, receipt);
     ts::return_shared(storage_unit);
-    ts::return_shared(admin_acl);
     ts::return_shared(character);
 
     ts::end(ts);
@@ -716,7 +752,7 @@ fun test_deposit_and_withdraw_by_owner() {
 
 /// This test simulates a 3rd party swap contract (like a marketplace)
 /// User B owner of the Storage Unit has lens in their storage (authorized with SwapAuth)
-/// User A has ammo in their storage (ephemeral storage attached to the SSU)
+/// User A has ammo in their owned inventory (attached to the SSU)
 /// User A interacts with Storage Unit with Swap logic
 /// Swap logic withdraws item owned by User A and deposits to User B storage
 /// Then it withdraws item owned by User B via auth logic and deposits to User A storage
@@ -795,20 +831,17 @@ fun test_swap_ammo_for_lens() {
             ts::most_recent_receiving_ticket<OwnerCap<Character>>(&character_a_id),
             ts.ctx(),
         );
-        let admin_acl = ts::take_shared<AdminACL>(&ts);
 
         swap_ammo_for_lens_extension(
             &mut storage_unit,
             &owner_cap_a,
             &character_a,
-            &admin_acl,
             ts.ctx(),
         );
 
         character_a.return_owner_cap(owner_cap_a, receipt_a);
         ts::return_shared(character_a);
         ts::return_shared(storage_unit);
-        ts::return_shared(admin_acl);
     };
 
     // Verify swap
@@ -1030,12 +1063,10 @@ fun test_deposit_via_extension_fail_not_authorized() {
             ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id),
             ts.ctx(),
         );
-        let admin_acl = ts::take_shared<AdminACL>(&ts);
 
         item =
             storage_unit.withdraw_by_owner(
                 &character,
-                &admin_acl,
                 &owner_cap,
                 AMMO_TYPE_ID,
                 AMMO_QUANTITY,
@@ -1043,7 +1074,6 @@ fun test_deposit_via_extension_fail_not_authorized() {
             );
 
         character.return_owner_cap(owner_cap, receipt);
-        ts::return_shared(admin_acl);
     };
 
     ts::next_tx(&mut ts, user_a());
@@ -1097,11 +1127,9 @@ fun test_withdraw_by_owner_fail_wrong_owner() {
             ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_b_id),
             ts.ctx(),
         );
-        let admin_acl = ts::take_shared<AdminACL>(&ts);
 
         let item = storage_unit.withdraw_by_owner(
             &character_b,
-            &admin_acl,
             &owner_cap,
             AMMO_TYPE_ID,
             AMMO_QUANTITY,
@@ -1111,7 +1139,6 @@ fun test_withdraw_by_owner_fail_wrong_owner() {
         storage_unit.deposit_by_owner(
             item,
             &character_b,
-            &admin_acl,
             &owner_cap,
             ts.ctx(),
         );
@@ -1119,7 +1146,6 @@ fun test_withdraw_by_owner_fail_wrong_owner() {
         character_b.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character_b);
         ts::return_shared(storage_unit);
-        ts::return_shared(admin_acl);
     };
     ts::end(ts);
 }
@@ -1155,12 +1181,10 @@ fun test_deposit_by_owner_fail_wrong_owner() {
             ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
             ts.ctx(),
         );
-        let admin_acl = ts::take_shared<AdminACL>(&ts);
 
         item =
             storage_unit.withdraw_by_owner(
                 &character_a,
-                &admin_acl,
                 &owner_cap,
                 AMMO_TYPE_ID,
                 AMMO_QUANTITY,
@@ -1170,7 +1194,6 @@ fun test_deposit_by_owner_fail_wrong_owner() {
         ts::return_shared(storage_unit);
         character_a.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character_a);
-        ts::return_shared(admin_acl);
     };
 
     create_storage_unit(
@@ -1190,13 +1213,11 @@ fun test_deposit_by_owner_fail_wrong_owner() {
             ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_b_id),
             ts.ctx(),
         );
-        let admin_acl = ts::take_shared<AdminACL>(&ts);
 
         // This should fail with EAssemblyNotAuthorized
         storage_unit.deposit_by_owner(
             item,
             &character_b,
-            &admin_acl,
             &owner_cap,
             ts.ctx(),
         );
@@ -1204,7 +1225,6 @@ fun test_deposit_by_owner_fail_wrong_owner() {
         character_b.return_owner_cap(owner_cap, receipt);
         ts::return_shared(storage_unit);
         ts::return_shared(character_b);
-        ts::return_shared(admin_acl);
     };
     ts::end(ts);
 }
@@ -1245,18 +1265,15 @@ fun test_swap_fail_extension_not_authorized() {
             ts::most_recent_receiving_ticket<OwnerCap<Character>>(&character_b_id),
             ts.ctx(),
         );
-        let admin_acl = ts::take_shared<AdminACL>(&ts);
 
         swap_ammo_for_lens_extension(
             &mut storage_unit,
             &owner_cap_b,
             &character_b,
-            &admin_acl,
             ts.ctx(),
         );
 
         ts::return_shared(storage_unit);
-        ts::return_shared(admin_acl);
         character_b.return_owner_cap(owner_cap_b, receipt_b);
         ts::return_shared(character_b);
     };
@@ -1518,7 +1535,6 @@ fun test_deposit_by_owner_fail_tenant_mismatch() {
     let item: Item;
     {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_b_id);
-        let admin_acl = ts::take_shared<AdminACL>(&ts);
         let mut character = ts::take_shared_by_id<Character>(&ts, character_id_diff_tenant);
         let (owner_cap, receipt) = character.borrow_owner_cap<StorageUnit>(
             ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id_diff_tenant),
@@ -1527,7 +1543,6 @@ fun test_deposit_by_owner_fail_tenant_mismatch() {
         item =
             storage_unit.withdraw_by_owner(
                 &character,
-                &admin_acl,
                 &owner_cap,
                 AMMO_TYPE_ID,
                 AMMO_QUANTITY,
@@ -1535,7 +1550,6 @@ fun test_deposit_by_owner_fail_tenant_mismatch() {
             );
 
         ts::return_shared(storage_unit);
-        ts::return_shared(admin_acl);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
     };
@@ -1560,18 +1574,15 @@ fun test_deposit_by_owner_fail_tenant_mismatch() {
             ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id),
             ts.ctx(),
         );
-        let admin_acl = ts::take_shared<AdminACL>(&ts);
 
         storage_unit.deposit_by_owner(
             item,
             &character,
-            &admin_acl,
             &owner_cap,
             ts.ctx(),
         );
 
         ts::return_shared(storage_unit);
-        ts::return_shared(admin_acl);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
     };
@@ -1619,11 +1630,9 @@ fun test_deposit_via_extension_fail_tenant_mismatch() {
             ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id_diff_tenant),
             ts.ctx(),
         );
-        let admin_acl = ts::take_shared<AdminACL>(&ts);
         item =
             storage_unit.withdraw_by_owner(
                 &character,
-                &admin_acl,
                 &owner_cap,
                 AMMO_TYPE_ID,
                 AMMO_QUANTITY,
@@ -1631,7 +1640,6 @@ fun test_deposit_via_extension_fail_tenant_mismatch() {
             );
 
         ts::return_shared(storage_unit);
-        ts::return_shared(admin_acl);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
     };
@@ -1913,6 +1921,347 @@ fun test_deposit_via_extension_fail_parent_id_mismatch() {
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character);
+    };
+    ts::end(ts);
+}
+
+// ============================================================
+// Extension-to-owned access mode tests (deposit_to_owned)
+// ============================================================
+
+/// Test full swap flow using extension-to-owned functions (no AdminACL needed)
+/// Scenario: User B owns SSU with lens, User A has ammo in owned inventory.
+///           Extension swaps ammo for lens using deposit_to_owned and withdraw_by_owner.
+/// Expected: Lens ends up in User A's owned inventory, ammo ends up in main inventory.
+#[test]
+fun test_swap_via_extension_to_owned() {
+    let mut ts = ts::begin(governor());
+    setup_nwn(&mut ts);
+    let character_a_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
+    let character_b_id = create_character(&mut ts, user_b(), CHARACTER_B_ITEM_ID);
+
+    // Create User B's storage unit with lens
+    let (storage_id, nwn_id) = create_storage_unit(
+        &mut ts,
+        character_b_id,
+        test_helpers::get_verified_location_hash(),
+        STORAGE_A_ITEM_ID,
+        STORAGE_A_TYPE_ID,
+    );
+    let storage_owner_cap_id = storage_owner_cap_id(&mut ts, storage_id);
+    online_storage_unit(&mut ts, user_b(), character_b_id, storage_id, nwn_id);
+    mint_lens<StorageUnit>(&mut ts, storage_id, character_b_id, user_b());
+
+    let character_owner_cap_id = character_owner_cap_id(&mut ts, character_a_id);
+    mint_ammo<Character>(&mut ts, storage_id, character_a_id, user_a());
+
+    // User B authorizes extension
+    ts::next_tx(&mut ts, user_b());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character = ts::take_shared_by_id<Character>(&ts, character_b_id);
+        let (owner_cap_b, receipt_b) = character.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_b_id),
+            ts.ctx(),
+        );
+        storage_unit.authorize_extension<SwapAuth>(&owner_cap_b);
+        character.return_owner_cap(owner_cap_b, receipt_b);
+        ts::return_shared(storage_unit);
+        ts::return_shared(character);
+    };
+
+    // Before swap assertions
+    ts::next_tx(&mut ts, admin());
+    {
+        let storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        assert_eq!(storage_unit.item_quantity(character_owner_cap_id, AMMO_TYPE_ID), AMMO_QUANTITY);
+        assert!(!storage_unit.contains_item(character_owner_cap_id, LENS_TYPE_ID));
+        assert_eq!(storage_unit.item_quantity(storage_owner_cap_id, LENS_TYPE_ID), LENS_QUANTITY);
+        assert!(!storage_unit.contains_item(storage_owner_cap_id, AMMO_TYPE_ID));
+        ts::return_shared(storage_unit);
+    };
+
+    // User A performs swap via extension-to-owned (no admin_acl needed)
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let (owner_cap_a, receipt_a) = character_a.borrow_owner_cap<Character>(
+            ts::most_recent_receiving_ticket<OwnerCap<Character>>(&character_a_id),
+            ts.ctx(),
+        );
+
+        swap_ammo_for_lens_via_extension(
+            &mut storage_unit,
+            &owner_cap_a,
+            &character_a,
+            ts.ctx(),
+        );
+
+        character_a.return_owner_cap(owner_cap_a, receipt_a);
+        ts::return_shared(character_a);
+        ts::return_shared(storage_unit);
+    };
+
+    // Verify swap results
+    ts::next_tx(&mut ts, admin());
+    {
+        let storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        assert_eq!(storage_unit.item_quantity(character_owner_cap_id, LENS_TYPE_ID), LENS_QUANTITY);
+        assert!(!storage_unit.contains_item(character_owner_cap_id, AMMO_TYPE_ID));
+        assert_eq!(storage_unit.item_quantity(storage_owner_cap_id, AMMO_TYPE_ID), AMMO_QUANTITY);
+        assert!(!storage_unit.contains_item(storage_owner_cap_id, LENS_TYPE_ID));
+        ts::return_shared(storage_unit);
+    };
+
+    ts::end(ts);
+}
+
+/// Test deposit_to_owned creates owned inventory on first use
+/// Scenario: Extension deposits item to a player who has no owned inventory yet
+/// Expected: Owned inventory is auto-created, item deposited successfully
+#[test]
+fun test_deposit_to_owned_creates_owned_inventory() {
+    let mut ts = ts::begin(governor());
+    setup_nwn(&mut ts);
+    let character_a_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
+    let character_b_id = create_character(&mut ts, user_b(), CHARACTER_B_ITEM_ID);
+
+    let (storage_id, nwn_id) = create_storage_unit(
+        &mut ts,
+        character_a_id,
+        LOCATION_A_HASH,
+        STORAGE_A_ITEM_ID,
+        STORAGE_A_TYPE_ID,
+    );
+    online_storage_unit(&mut ts, user_a(), character_a_id, storage_id, nwn_id);
+    mint_ammo<StorageUnit>(&mut ts, storage_id, character_a_id, user_a());
+
+    // Authorize extension
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let (owner_cap, receipt) = character.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
+            ts.ctx(),
+        );
+        storage_unit.authorize_extension<SwapAuth>(&owner_cap);
+        ts::return_shared(storage_unit);
+        character.return_owner_cap(owner_cap, receipt);
+        ts::return_shared(character);
+    };
+
+    let character_b_owner_cap_id = character_owner_cap_id(&mut ts, character_b_id);
+
+    // Verify User B has no owned inventory yet
+    ts::next_tx(&mut ts, admin());
+    {
+        let storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        assert!(!storage_unit.has_inventory(character_b_owner_cap_id));
+        assert_eq!(storage_unit.inventory_keys().length(), 1);
+        ts::return_shared(storage_unit);
+    };
+
+    // Withdraw from main, deposit to User B's owned inventory via extension
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let character = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
+        let item = storage_unit.withdraw_item<SwapAuth>(
+            &character,
+            SwapAuth {},
+            AMMO_TYPE_ID,
+            AMMO_QUANTITY,
+            ts.ctx(),
+        );
+        storage_unit.deposit_to_owned<SwapAuth>(
+            &character_b,
+            item,
+            SwapAuth {},
+            ts.ctx(),
+        );
+        ts::return_shared(storage_unit);
+        ts::return_shared(character);
+        ts::return_shared(character_b);
+    };
+
+    // Verify owned inventory was created and item deposited
+    ts::next_tx(&mut ts, admin());
+    {
+        let storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        assert!(storage_unit.has_inventory(character_b_owner_cap_id));
+        assert_eq!(storage_unit.inventory_keys().length(), 2);
+        assert_eq!(
+            storage_unit.item_quantity(character_b_owner_cap_id, AMMO_TYPE_ID),
+            AMMO_QUANTITY,
+        );
+        ts::return_shared(storage_unit);
+    };
+
+    ts::end(ts);
+}
+
+/// Test deposit_to_owned fails without extension authorization
+/// Scenario: Try to deposit to owned inventory via extension that is not authorized
+/// Expected: Transaction aborts with EExtensionNotAuthorized error
+#[test]
+#[expected_failure(abort_code = storage_unit::EExtensionNotAuthorized)]
+fun test_deposit_to_owned_fail_not_authorized() {
+    let mut ts = ts::begin(governor());
+    setup_nwn(&mut ts);
+    let character_a_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
+
+    let (storage_id, nwn_id) = create_storage_unit(
+        &mut ts,
+        character_a_id,
+        LOCATION_A_HASH,
+        STORAGE_A_ITEM_ID,
+        STORAGE_A_TYPE_ID,
+    );
+    online_storage_unit(&mut ts, user_a(), character_a_id, storage_id, nwn_id);
+    mint_ammo<StorageUnit>(&mut ts, storage_id, character_a_id, user_a());
+
+    // Withdraw by owner so we have an Item
+    ts::next_tx(&mut ts, user_a());
+    let item: Item;
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let mut character = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let (owner_cap, receipt) = character.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
+            ts.ctx(),
+        );
+
+        item =
+            storage_unit.withdraw_by_owner(
+                &character,
+                &owner_cap,
+                AMMO_TYPE_ID,
+                AMMO_QUANTITY,
+                ts.ctx(),
+            );
+
+        character.return_owner_cap(owner_cap, receipt);
+        ts::return_shared(character);
+        ts::return_shared(storage_unit);
+    };
+
+    let character_b_id = create_character(&mut ts, user_b(), CHARACTER_B_ITEM_ID);
+
+    // No extension authorization — should fail
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_id);
+        let character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
+        storage_unit.deposit_to_owned<SwapAuth>(
+            &character_b,
+            item,
+            SwapAuth {},
+            ts.ctx(),
+        );
+        ts::return_shared(storage_unit);
+        ts::return_shared(character_b);
+    };
+    ts::end(ts);
+}
+
+/// Test deposit_to_owned fails with parent_id mismatch
+/// Scenario: Withdraw item from storage unit A, try to deposit_to_owned on storage unit B
+/// Expected: Transaction aborts with EItemParentMismatch error
+#[test]
+#[expected_failure(abort_code = storage_unit::EItemParentMismatch)]
+fun test_deposit_to_owned_fail_parent_id_mismatch() {
+    let mut ts = ts::begin(governor());
+    setup_nwn(&mut ts);
+    let character_a_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
+    let character_b_id = create_character(&mut ts, user_b(), CHARACTER_B_ITEM_ID);
+
+    // Create storage unit A
+    let (storage_a_id, nwn_a_id) = create_storage_unit(
+        &mut ts,
+        character_a_id,
+        LOCATION_A_HASH,
+        STORAGE_A_ITEM_ID,
+        STORAGE_A_TYPE_ID,
+    );
+    online_storage_unit(&mut ts, user_a(), character_a_id, storage_a_id, nwn_a_id);
+    mint_ammo<StorageUnit>(&mut ts, storage_a_id, character_a_id, user_a());
+
+    // Authorize extension on storage A and withdraw
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_a_id);
+        let mut character = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let (owner_cap, receipt) = character.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
+            ts.ctx(),
+        );
+        storage_unit.authorize_extension<SwapAuth>(&owner_cap);
+        ts::return_shared(storage_unit);
+        character.return_owner_cap(owner_cap, receipt);
+        ts::return_shared(character);
+    };
+
+    ts::next_tx(&mut ts, user_a());
+    let item: Item;
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_a_id);
+        let character = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        item =
+            storage_unit.withdraw_item<SwapAuth>(
+                &character,
+                SwapAuth {},
+                AMMO_TYPE_ID,
+                AMMO_QUANTITY,
+                ts.ctx(),
+            );
+        ts::return_shared(storage_unit);
+        ts::return_shared(character);
+    };
+
+    // Create storage unit B
+    let (storage_b_id, nwn_b_id) = create_storage_unit(
+        &mut ts,
+        character_a_id,
+        test_helpers::get_verified_location_hash(),
+        STORAGE_A_ITEM_ID + 1,
+        STORAGE_A_TYPE_ID,
+    );
+
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_b_id);
+        let mut nwn = ts::take_shared_by_id<NetworkNode>(&ts, nwn_b_id);
+        let energy_config = ts::take_shared<EnergyConfig>(&ts);
+        let mut character = ts::take_shared_by_id<Character>(&ts, character_a_id);
+        let (owner_cap, receipt) = character.borrow_owner_cap<StorageUnit>(
+            ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_a_id),
+            ts.ctx(),
+        );
+        storage_unit.online(&mut nwn, &energy_config, &owner_cap);
+        storage_unit.authorize_extension<SwapAuth>(&owner_cap);
+        character.return_owner_cap(owner_cap, receipt);
+        ts::return_shared(storage_unit);
+        ts::return_shared(nwn);
+        ts::return_shared(energy_config);
+        ts::return_shared(character);
+    };
+
+    // Try to deposit_to_owned on storage B with item from storage A — parent_id mismatch
+    ts::next_tx(&mut ts, user_a());
+    {
+        let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_b_id);
+        let character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
+        storage_unit.deposit_to_owned<SwapAuth>(
+            &character_b,
+            item,
+            SwapAuth {},
+            ts.ctx(),
+        );
+        ts::return_shared(storage_unit);
+        ts::return_shared(character_b);
     };
     ts::end(ts);
 }
