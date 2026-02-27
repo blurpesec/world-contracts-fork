@@ -140,7 +140,6 @@ fun mint_ammo(ts: &mut ts::Scenario, character_id: ID) {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             AMMO_QUANTITY,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character);
@@ -226,7 +225,6 @@ fun mint_items_increases_quantity_when_exists() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             5u32,
-            LOCATION_A_HASH,
         );
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_id);
@@ -255,7 +253,6 @@ fun mint_items_increases_quantity_when_exists() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             5u32,
-            LOCATION_A_HASH,
         );
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_id);
@@ -263,7 +260,6 @@ fun mint_items_increases_quantity_when_exists() {
         assert_eq!(inv_ref.remaining_capacity(), 0);
         assert_eq!(inv_ref.item_quantity(AMMO_TYPE_ID), 10);
         assert_eq!(inv_ref.inventory_item_length(), 1);
-        assert_eq!(inv_ref.item_location(AMMO_TYPE_ID), LOCATION_A_HASH);
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -381,7 +377,6 @@ public fun deposit_item_merges_quantity_when_same_type_id() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             5u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character_a);
@@ -412,7 +407,6 @@ public fun deposit_item_merges_quantity_when_same_type_id() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             3u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character_b);
@@ -433,6 +427,7 @@ public fun deposit_item_merges_quantity_when_same_type_id() {
             &character_b,
             AMMO_TYPE_ID,
             3u32,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
         let inv_a = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
@@ -518,6 +513,7 @@ public fun deposit_items() {
             &character_a,
             AMMO_TYPE_ID,
             AMMO_QUANTITY,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
 
@@ -587,7 +583,6 @@ fun burn_items_with_proof() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             AMMO_QUANTITY,
-            x"16217de8ec7330ec3eac32831df5c9cd9b21a255756a5fd5762dd7f49f6cc049",
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character);
@@ -694,7 +689,6 @@ fun mint_items_fail_empty_type_id() {
             0,
             AMMO_VOLUME,
             AMMO_QUANTITY,
-            LOCATION_A_HASH,
         );
         ts::return_shared(character);
         ts::return_shared(storage_unit);
@@ -734,7 +728,6 @@ fun mint_fail_inventory_insufficient_capacity() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             15u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(character);
         ts::return_shared(storage_unit);
@@ -849,6 +842,7 @@ fun deposit_item_fail_insufficient_capacity() {
             &character_a,
             AMMO_TYPE_ID,
             AMMO_QUANTITY,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
         ts::return_shared(storage_unit);
@@ -899,6 +893,7 @@ fun withdraw_item_fail_item_not_found() {
             &character,
             1222,
             AMMO_QUANTITY,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
         // Unreachable code below - needed to satisfy Move's type checker
@@ -936,6 +931,7 @@ fun withdraw_partial_quantity() {
             &character,
             AMMO_TYPE_ID,
             5u32,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
 
@@ -986,6 +982,7 @@ fun withdraw_fail_zero_quantity() {
             &character,
             AMMO_TYPE_ID,
             0u32,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
         inventory.deposit_item(assembly_id, assembly_key, &character, item);
@@ -1022,6 +1019,7 @@ fun withdraw_fail_exceeds_quantity() {
             &character,
             AMMO_TYPE_ID,
             15u32,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
         inventory.deposit_item(assembly_id, assembly_key, &character, item);
@@ -1061,7 +1059,6 @@ fun deposit_item_with_volume_decrease() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             5u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character_a);
@@ -1092,7 +1089,6 @@ fun deposit_item_with_volume_decrease() {
             AMMO_TYPE_ID,
             50u64,
             3u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character_b);
@@ -1113,6 +1109,7 @@ fun deposit_item_with_volume_decrease() {
             &character_b,
             AMMO_TYPE_ID,
             3u32,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
         let inv_a = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
@@ -1163,7 +1160,6 @@ fun deposit_item_with_volume_increase() {
             AMMO_TYPE_ID,
             50u64,
             5u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character_a);
@@ -1194,7 +1190,6 @@ fun deposit_item_with_volume_increase() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             3u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character_b);
@@ -1215,6 +1210,7 @@ fun deposit_item_with_volume_increase() {
             &character_b,
             AMMO_TYPE_ID,
             3u32,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
         let inv_a = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
@@ -1266,7 +1262,6 @@ fun deposit_item_fail_exceeds_capacity_with_volume_change() {
             AMMO_TYPE_ID,
             50u64,
             5u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character_a);
@@ -1289,7 +1284,6 @@ fun deposit_item_fail_exceeds_capacity_with_volume_change() {
             99999u64,
             50u64,
             10u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character_a);
@@ -1320,7 +1314,6 @@ fun deposit_item_fail_exceeds_capacity_with_volume_change() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             3u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character_b);
@@ -1341,6 +1334,7 @@ fun deposit_item_fail_exceeds_capacity_with_volume_change() {
             &character_b,
             AMMO_TYPE_ID,
             3u32,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
         let inv_a = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
@@ -1381,7 +1375,6 @@ fun mint_with_volume_change() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             5u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character);
@@ -1405,7 +1398,6 @@ fun mint_with_volume_change() {
             AMMO_TYPE_ID,
             50u64,
             3u32,
-            LOCATION_A_HASH,
         );
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_id);
@@ -1451,7 +1443,6 @@ fun withdraw_spans_multi_entry_fifo() {
             AMMO_TYPE_ID,
             AMMO_VOLUME,
             5u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character);
@@ -1474,7 +1465,6 @@ fun withdraw_spans_multi_entry_fifo() {
             AMMO_TYPE_ID,
             50u64,
             3u32,
-            LOCATION_A_HASH,
         );
         ts::return_shared(storage_unit);
         ts::return_shared(character);
@@ -1494,6 +1484,7 @@ fun withdraw_spans_multi_entry_fifo() {
             &character,
             AMMO_TYPE_ID,
             7u32,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
 
@@ -1566,6 +1557,7 @@ fun round_trip_split_join_df_quantities() {
             &character,
             AMMO_TYPE_ID,
             3u32,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
 
@@ -1614,6 +1606,7 @@ fun round_trip_split_join_df_quantities() {
             &character,
             AMMO_TYPE_ID,
             AMMO_QUANTITY,
+            LOCATION_A_HASH,
             ts.ctx(),
         );
 

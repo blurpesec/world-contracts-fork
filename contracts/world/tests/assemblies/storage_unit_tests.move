@@ -9,7 +9,6 @@ use world::{
     fuel::FuelConfig,
     in_game_id,
     inventory::Item,
-    location,
     network_node::{Self, NetworkNode},
     object_registry::ObjectRegistry,
     storage_unit::{Self, StorageUnit},
@@ -1819,12 +1818,12 @@ fun test_fail_network_node_offline() {
     ts::end(ts);
 }
 
-/// Test that deposit via extension fails when item location doesn't match storage unit location
-/// Scenario: Withdraw item from storage unit A, try to deposit into storage unit B at a different location
-/// Expected: Transaction aborts with ENotInProximity error
+/// Test that deposit via extension fails when item parent_id doesn't match storage unit
+/// Scenario: Withdraw item from storage unit A, try to deposit into storage unit B
+/// Expected: Transaction aborts with EItemParentMismatch error
 #[test]
-#[expected_failure(abort_code = location::ENotInProximity)]
-fun test_deposit_via_extension_fail_location_mismatch() {
+#[expected_failure(abort_code = storage_unit::EItemParentMismatch)]
+fun test_deposit_via_extension_fail_parent_id_mismatch() {
     let mut ts = ts::begin(governor());
     setup_nwn(&mut ts);
     let character_id = create_character(&mut ts, user_a(), CHARACTER_A_ITEM_ID);
@@ -1901,7 +1900,7 @@ fun test_deposit_via_extension_fail_location_mismatch() {
         ts::return_shared(character);
     };
 
-    // Try to deposit item from storage unit A into storage unit B — location mismatch
+    // Try to deposit item from storage unit A into storage unit B — parent_id mismatch
     ts::next_tx(&mut ts, user_a());
     {
         let mut storage_unit = ts::take_shared_by_id<StorageUnit>(&ts, storage_b_id);

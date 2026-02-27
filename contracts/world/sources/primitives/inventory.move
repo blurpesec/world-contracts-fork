@@ -13,8 +13,8 @@
 ///
 /// The game server may change an item type's volume between mints. Instead of
 /// retroactively recalculating capacity for all existing items (which can silently
-/// block deposits or break capacity logic), each distinct volume is stored as a **separate entry** in the
-/// vector for that `type_id`:
+/// block deposits or break capacity logic), each distinct volume is stored as a
+/// **separate entry** in the vector for that `type_id`:
 ///
 ///   `items: VecMap<u64, vector<ItemEntry>>`
 ///         type_id ──┘        └── stack of entries, one per volume cohort
@@ -32,6 +32,13 @@
 ///     *own* volume, so old items release exactly the capacity they originally claimed.
 ///   - The transit `Item` always carries the **latest** volume (from the last entry),
 ///     ensuring items that land in another inventory reflect the most recent game state.
+///
+/// # Parent-ID tracking
+///
+/// Each transit `Item` carries a `parent_id` — the object ID of the assembly
+/// (e.g. StorageUnit) the item was withdrawn from. The parent layer uses this on
+/// deposit to verify items are returning to their origin. Location data is also
+/// attached as metadata but is not used for deposit validation.
 ///
 /// # Bridging
 ///
@@ -88,21 +95,28 @@ public struct Inventory has store {
 ///
 /// Has `copy, drop, store` — no UID, no object overhead. Think of this as the
 /// `Balance` to `Item`'s `Coin`. Split and join operate directly on this form.
+///
+/// Does **not** store location — location is just-in-time metadata injected by the
+/// parent layer (e.g. StorageUnit) when creating a transit `Item` on withdrawal.
 public struct ItemEntry has copy, drop, store {
     tenant: String,
     type_id: u64,
     item_id: u64,
     volume: u64,
     quantity: u32,
-    location_hash: vector<u8>,
 }
 
 /// Transit form of an item — created on withdraw, consumed on deposit.
 ///
 /// Carries a fresh UID so it can be transferred between inventories as a
 /// first-class Sui object. Destroyed (UID deleted) when deposited.
+///
+/// `parent_id` is the object ID of the assembly this item was withdrawn from
+/// (e.g. a StorageUnit). The parent layer checks this on deposit to ensure items
+/// return to their origin.
 public struct Item has key, store {
     id: UID,
+    parent_id: ID,
     tenant: String,
     type_id: u64,
     item_id: u64,
@@ -169,8 +183,15 @@ public fun contains_item(inventory: &Inventory, type_id: u64): bool {
     inventory.items.contains(&type_id)
 }
 
+/// Returns the location hash from the transit Item (metadata only, not used for
+/// deposit validation — parent_id is used instead).
 public fun get_item_location_hash(item: &Item): vector<u8> {
     item.location.hash()
+}
+
+/// Returns the object ID of the assembly this item was withdrawn from.
+public fun parent_id(item: &Item): ID {
+    item.parent_id
 }
 
 public fun max_capacity(inventory: &Inventory): u64 {
@@ -198,7 +219,6 @@ public(package) fun split(entry: &mut ItemEntry, quantity: u32): ItemEntry {
         item_id: entry.item_id,
         volume: entry.volume,
         quantity,
-        location_hash: entry.location_hash,
     }
 }
 
@@ -241,7 +261,6 @@ public(package) fun mint_items(
     type_id: u64,
     volume: u64,
     quantity: u32,
-    location_hash: vector<u8>,
 ) {
     assert!(type_id != 0, ETypeIdEmpty);
 
@@ -280,14 +299,7 @@ public(package) fun mint_items(
                 type_id,
                 quantity,
             });
-            entries.push_back(ItemEntry {
-                tenant,
-                type_id,
-                item_id,
-                volume,
-                quantity,
-                location_hash,
-            });
+            entries.push_back(ItemEntry { tenant, type_id, item_id, volume, quantity });
         };
     } else {
         event::emit(ItemMintedEvent {
@@ -301,19 +313,7 @@ public(package) fun mint_items(
         });
         inventory
             .items
-            .insert(
-                type_id,
-                vector[
-                    ItemEntry {
-                        tenant,
-                        type_id,
-                        item_id,
-                        volume,
-                        quantity,
-                        location_hash,
-                    },
-                ],
-            );
+            .insert(type_id, vector[ItemEntry { tenant, type_id, item_id, volume, quantity }]);
     };
 }
 
@@ -346,6 +346,9 @@ public(package) fun burn_items_with_proof(
 /// Destroys the `Item`'s UID, extracts its data into an `ItemEntry`, and either
 /// joins into the last entry (if volumes match) or pushes a new entry (if they
 /// differ). Capacity cost is only the incoming items — old entries are untouched.
+///
+/// Parent-ID validation is **not** done here — that is the responsibility of the
+/// parent layer (e.g. storage_unit.move) which has access to the assembly's object ID.
 public(package) fun deposit_item(
     inventory: &mut Inventory,
     assembly_id: ID,
@@ -353,9 +356,8 @@ public(package) fun deposit_item(
     character: &Character,
     item: Item,
 ) {
-    let Item { id, tenant, type_id, item_id, volume, quantity, location } = item;
+    let Item { id, parent_id: _, tenant, type_id, item_id, volume, quantity, location } = item;
     id.delete();
-    let location_hash = location.hash();
     location.remove();
 
     let req_capacity = calculate_volume(volume, quantity);
@@ -363,7 +365,7 @@ public(package) fun deposit_item(
     assert!(req_capacity <= remaining, EInventoryInsufficientCapacity);
     inventory.used_capacity = inventory.used_capacity + req_capacity;
 
-    let entry = ItemEntry { tenant, type_id, item_id, volume, quantity, location_hash };
+    let entry = ItemEntry { tenant, type_id, item_id, volume, quantity };
 
     if (inventory.items.contains(&type_id)) {
         let entries = &mut inventory.items[&type_id];
@@ -419,6 +421,11 @@ public(package) fun deposit_item(
 /// *last* entry in the vector (the most recent game state), regardless of which
 /// entries were consumed. This ensures depositing elsewhere uses the current volume.
 ///
+/// `location_hash` is injected by the parent layer (e.g. StorageUnit) — it is not
+/// stored in `ItemEntry` since it is just-in-time metadata for the transit `Item`.
+///
+/// `assembly_id` doubles as the `parent_id` on the resulting `Item`.
+///
 /// The entry vector is removed from the VecMap before mutation and re-inserted
 /// afterward (if non-empty) to avoid borrow-checker conflicts with `used_capacity`.
 public(package) fun withdraw_item(
@@ -428,18 +435,19 @@ public(package) fun withdraw_item(
     character: &Character,
     type_id: u64,
     quantity: u32,
+    location_hash: vector<u8>,
     ctx: &mut TxContext,
 ): Item {
     assert!(inventory.items.contains(&type_id), EItemDoesNotExist);
     assert!(quantity > 0, ESplitQuantityInvalid);
 
     // Snapshot metadata via an immutable borrow before we mutate.
-    let (total_qty, latest_volume, item_id, tenant, location_hash) = {
+    let (total_qty, latest_volume, item_id, tenant) = {
         let entries = &inventory.items[&type_id];
         let len = entries.length();
         let first = &entries[0];
         let last = &entries[len - 1];
-        (sum_quantity(entries), last.volume, first.item_id, first.tenant, first.location_hash)
+        (sum_quantity(entries), last.volume, first.item_id, first.tenant)
     };
     assert!(total_qty >= quantity, EInventoryInsufficientQuantity);
 
@@ -486,6 +494,7 @@ public(package) fun withdraw_item(
 
     Item {
         id: object::new(ctx),
+        parent_id: assembly_id,
         tenant,
         type_id,
         item_id,
@@ -622,11 +631,6 @@ public fun item_quantity(inventory: &Inventory, type_id: u64): u32 {
 public fun item_volume(inventory: &Inventory, type_id: u64): u64 {
     let entries = &inventory.items[&type_id];
     entries[entries.length() - 1].volume
-}
-
-#[test_only]
-public fun item_location(inventory: &Inventory, type_id: u64): vector<u8> {
-    inventory.items[&type_id][0].location_hash
 }
 
 /// Number of unique type_ids in the inventory (not total entries).
