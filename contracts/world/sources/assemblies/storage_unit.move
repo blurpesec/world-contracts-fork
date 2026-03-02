@@ -237,9 +237,9 @@ public fun withdraw_item<Auth: drop>(
 }
 
 /// Extension-authorized deposit into a player's owned inventory.
-/// Unlike `deposit_by_owner`, the target player does NOT need to be the transaction sender.
-/// The target's owned inventory is derived from `target.owner_cap_id()`, ensuring the
-/// target is a valid, existing Character.
+/// Unlike `deposit_by_owner`, the recipient (the `character` argument) does NOT need to be
+/// the transaction sender. The recipient's owned inventory is derived from
+/// `character.owner_cap_id()`, ensuring the character is a valid, existing Character.
 /// Creates the owned inventory if it doesn't exist yet.
 public fun deposit_to_owned<Auth: drop>(
     storage_unit: &mut StorageUnit,
