@@ -57,6 +57,7 @@ public fun collect_corpse_bounty<T: key>(
         admin_acl,
         player_inventory_owner_cap,
         corpe_item_id,
+        1,
         ctx,
     );
 
