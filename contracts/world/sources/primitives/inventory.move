@@ -15,6 +15,15 @@
 //   items directly into an on-chain inventory. Restricted by admin capability.
 // - **Chain → Game (burn):** Burns the on-chain item and emits an event; the game
 //   server listens to recreate the item in-game. Restricted by proximity proof.
+//
+// # Volume
+//
+// Volume per `type_id` is static: the first mint/deposit sets the volume,
+// and subsequent operations use the stored volume for capacity accounting.
+// Incoming volume mismatches are silently ignored.
+//
+// TODO: volume is currently assumed static per type_id — incoming volume mismatches
+// are silently ignored. Volume may change over time and will need proper handling.
 module world::inventory;
 
 use std::string::String;
@@ -213,7 +222,14 @@ public(package) fun mint_items(
 ) {
     assert!(type_id != 0, ETypeIdEmpty);
 
-    let req_capacity = calculate_volume(volume, quantity);
+    // Use stored volume when the type_id already exists (volume is static per type_id).
+    let effective_volume = if (inventory.items.contains(&type_id)) {
+        inventory.items[&type_id].volume
+    } else {
+        volume
+    };
+
+    let req_capacity = calculate_volume(effective_volume, quantity);
     let remaining = inventory.max_capacity - inventory.used_capacity;
     assert!(req_capacity <= remaining, EInventoryInsufficientCapacity);
     inventory.used_capacity = inventory.used_capacity + req_capacity;
@@ -280,7 +296,14 @@ public(package) fun deposit_item(
     id.delete();
     location.remove();
 
-    let req_capacity = calculate_volume(volume, quantity);
+    // Use stored volume when the type_id already exists (volume is static per type_id).
+    let effective_volume = if (inventory.items.contains(&type_id)) {
+        inventory.items[&type_id].volume
+    } else {
+        volume
+    };
+
+    let req_capacity = calculate_volume(effective_volume, quantity);
     let remaining = inventory.max_capacity - inventory.used_capacity;
     assert!(req_capacity <= remaining, EInventoryInsufficientCapacity);
     inventory.used_capacity = inventory.used_capacity + req_capacity;
