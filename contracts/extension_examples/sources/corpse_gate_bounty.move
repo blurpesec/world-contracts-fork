@@ -9,12 +9,7 @@ module extension_examples::corpse_gate_bounty;
 
 use extension_examples::config::{Self, AdminCap, XAuth, ExtensionConfig};
 use sui::clock::Clock;
-use world::{
-    access::{AdminACL, OwnerCap},
-    character::Character,
-    gate::{Self, Gate},
-    storage_unit::StorageUnit
-};
+use world::{access::OwnerCap, character::Character, gate::{Self, Gate}, storage_unit::StorageUnit};
 
 // === Errors ===
 #[error(code = 0)]
@@ -39,7 +34,6 @@ public fun collect_corpse_bounty<T: key>(
     source_gate: &Gate,
     destination_gate: &Gate,
     character: &Character,
-    admin_acl: &AdminACL,
     player_inventory_owner_cap: &OwnerCap<T>,
     corpe_item_id: u64,
     clock: &Clock,
@@ -54,9 +48,9 @@ public fun collect_corpse_bounty<T: key>(
     // Withdraw the corpse from the player's inventory (owner-authorized).
     let corpse = storage_unit.withdraw_by_owner<T>(
         character,
-        admin_acl,
         player_inventory_owner_cap,
         corpe_item_id,
+        1,
         ctx,
     );
 
