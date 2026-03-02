@@ -2,7 +2,8 @@
   "locationHash": "0x16217de8ec7330ec3eac32831df5c9cd9b21a255756a5fd5762dd7f49f6cc049",
   "character": {
     "gameCharacterId": 811880,
-    "gameCharacterBId": 900000001
+    "gameCharacterBId": 900000001,
+    "gameCharacterCId": 900000002
   },
   "networkNode": {
     "typeId": 555,

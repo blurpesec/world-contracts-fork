@@ -10,7 +10,7 @@ import {
 import { keypairFromPrivateKey } from "../utils/client";
 import { MODULES } from "../utils/config";
 import { deriveObjectId } from "../utils/derive-object-id";
-import { GAME_CHARACTER_B_ID, GAME_CHARACTER_ID } from "../utils/constants";
+import { GAME_CHARACTER_B_ID, GAME_CHARACTER_C_ID, GAME_CHARACTER_ID } from "../utils/constants";
 import { delay, getDelayMs } from "../utils/delay";
 
 const TRIBE_ID = 100;
@@ -78,6 +78,16 @@ async function main() {
         await createCharacter(env.tenant, playerAddressA, GAME_CHARACTER_ID, ctx);
         await delay(getDelayMs());
         await createCharacter(env.tenant, playerAddressB, GAME_CHARACTER_B_ID, ctx);
+
+        if (process.env.PLAYER_C_PRIVATE_KEY) {
+            await delay(getDelayMs());
+            await createCharacter(
+                env.tenant,
+                keypairFromPrivateKey(process.env.PLAYER_C_PRIVATE_KEY).getPublicKey().toSuiAddress(),
+                GAME_CHARACTER_C_ID,
+                ctx
+            );
+        }
     } catch (error) {
         handleError(error);
     }
