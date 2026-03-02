@@ -1925,10 +1925,6 @@ fun test_deposit_via_extension_fail_parent_id_mismatch() {
     ts::end(ts);
 }
 
-// ============================================================
-// Extension-to-owned access mode tests (deposit_to_owned)
-// ============================================================
-
 /// Test full swap flow using extension-to-owned functions (no AdminACL needed)
 /// Scenario: User B owns SSU with lens, User A has ammo in owned inventory.
 ///           Extension swaps ammo for lens using deposit_to_owned and withdraw_by_owner.
