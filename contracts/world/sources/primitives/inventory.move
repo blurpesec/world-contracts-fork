@@ -1,27 +1,20 @@
-/// Inventory: on-chain item storage with split/join semantics.
-///
-/// # Architecture — Coin/Balance pattern
-///
-/// Items use a two-form design inspired by Sui's `Coin` / `Balance` split:
-///
-/// - **`ItemEntry`** (at-rest) — lightweight data with `copy, drop, store`. Lives inside
-///   the `Inventory` struct. No UID, no object overhead. Analogous to `Balance`.
-/// - **`Item`** (in-transit) — a full Sui object with `key, store` and a UID. Created on
-///   withdrawal, consumed on deposit. Analogous to `Coin`.
-///
-/// # Parent-ID tracking
-///
-/// Each transit `Item` carries a `parent_id` — the object ID of the assembly
-/// (e.g. StorageUnit) the item was withdrawn from. The parent layer uses this on
-/// deposit to verify items are returning to their origin. Location data is also
-/// attached as metadata but is not used for deposit validation.
-///
-/// # Bridging
-///
-/// - **Game → Chain (mint):** The game server calls an admin-gated function to mint
-///   items directly into an on-chain inventory.
-/// - **Chain → Game (burn):** Burning emits an `ItemBurnedEvent`; the game server
-///   listens and creates the item in-game. Requires a proximity proof.
+// This module implements the logic of inventory operations such as depositing, withdrawing and transferring items between inventories.
+//
+// Items have two forms, inspired by Sui's `Coin` / `Balance` split:
+//
+// - **`ItemEntry`** (at-rest) — lightweight `copy, drop, store` dynamic field data inside `Inventory`.
+// - **`Item`** (in-transit) — a Sui object created on withdrawal, consumed on deposit.
+//   Carries a `parent_id` so the parent assembly can verify origin on deposit.
+//   Also carries location data for more robust proximity validation in the future.
+//
+// # Bridging
+//
+// The game server is the trusted bridge between game and chain.
+//
+// - **Game → Chain (mint):** The game server calls an admin-gated function to mint
+//   items directly into an on-chain inventory. Restricted by admin capability.
+// - **Chain → Game (burn):** Burns the on-chain item and emits an event; the game
+//   server listens to recreate the item in-game. Restricted by proximity proof.
 module world::inventory;
 
 use std::string::String;
@@ -52,24 +45,30 @@ const ESplitQuantityInvalid: vector<u8> =
 
 // === Structs ===
 
-/// On-chain inventory that tracks items by `type_id`.
-///
-/// Each `type_id` maps to a single `ItemEntry`. `used_capacity` is the running
-/// total of `volume * quantity` across every entry. It must never exceed
-/// `max_capacity`.
+// On-chain inventory that tracks items by `type_id`.
+//
+// Each `type_id` maps to a single `ItemEntry`. `used_capacity` is the running
+// total of `volume * quantity` across every entry. It must never exceed
+// `max_capacity`.
+//
+// The inventory struct is a dynamic field entry attached to its host assembly, so it does not have a key.
+// Note: Gas cost is high, lookup and insert complexity for VecMap is o(n). The alternative is to use a Table and a separate Vector.
+// Currently, VecMap seems to be the best fit for this use case but can be revisited if performance becomes an issue.
 public struct Inventory has store {
     max_capacity: u64,
     used_capacity: u64,
     items: VecMap<u64, ItemEntry>,
 }
 
-/// At-rest item data stored inside an `Inventory`.
-///
-/// Has `copy, drop, store` — no UID, no object overhead. Think of this as the
-/// `Balance` to `Item`'s `Coin`.
-///
-/// Does **not** store location — location is just-in-time metadata injected by the
-/// parent layer (e.g. StorageUnit) when creating a transit `Item` on withdrawal.
+// At-rest item data stored inside an `Inventory`.
+//
+// Has `copy, drop, store` — no UID, no object overhead. Think of this as the
+// `Balance` to `Item`'s `Coin`.
+//
+// Does **not** store location or parent_id — these are just-in-time metadata injected by the
+// parent layer (e.g. StorageUnit) when creating a transit `Item` on withdrawal.
+//
+// Note: we assume that volume is constant for a given type_id.
 public struct ItemEntry has copy, drop, store {
     tenant: String,
     type_id: u64,
@@ -196,10 +195,11 @@ public(package) fun create(max_capacity: u64): Inventory {
     }
 }
 
-/// Mints items into inventory (Game → Chain bridge).
-///
-/// If the type_id already exists, increases quantity in place.
-/// Otherwise, creates a new entry.
+// Mints items into inventory (Game → Chain bridge).
+// Package-scoped — only callable from within the `world` module.
+// This ensures that minting only happens from trusted sources.
+// If the type_id already exists, increases quantity in place.
+// Otherwise, creates a new entry.
 public(package) fun mint_items(
     inventory: &mut Inventory,
     assembly_id: ID,
@@ -262,13 +262,13 @@ public(package) fun burn_items_with_proof(
     burn_items(inventory, assembly_id, assembly_key, character, type_id, quantity);
 }
 
-/// Deposits a transit `Item` back into the inventory.
-///
-/// Destroys the `Item`'s UID, extracts its data into an `ItemEntry`, and either
-/// joins into the existing entry or creates a new one.
-///
-/// Parent-ID validation is **not** done here — that is the responsibility of the
-/// parent layer (e.g. storage_unit.move) which has access to the assembly's object ID.
+// Deposits a transit `Item` back into the inventory.
+//
+// Destroys the `Item`'s UID, extracts its data into an `ItemEntry`, and either
+// joins into the existing entry or creates a new one.
+//
+// Parent-ID validation is **not** done here — that is the responsibility of the
+// parent layer (e.g. storage_unit.move) which has access to the assembly's object ID.
 public(package) fun deposit_item(
     inventory: &mut Inventory,
     assembly_id: ID,
@@ -308,12 +308,12 @@ public(package) fun deposit_item(
     });
 }
 
-/// Withdraws items from the inventory and wraps them into a transit `Item`.
-///
-/// `location_hash` is injected by the parent layer (e.g. StorageUnit) — it is not
-/// stored in `ItemEntry` since it is just-in-time metadata for the transit `Item`.
-///
-/// `assembly_id` doubles as the `parent_id` on the resulting `Item`.
+// Withdraws items from the inventory and wraps them into a transit `Item`.
+//
+// `location_hash` is injected by the parent layer (e.g. StorageUnit) — it is not
+// stored in `ItemEntry` since it is just-in-time metadata for the transit `Item`.
+//
+// `assembly_id` doubles as the `parent_id` on the resulting `Item`.
 public(package) fun withdraw_item(
     inventory: &mut Inventory,
     assembly_id: ID,
@@ -372,6 +372,7 @@ public(package) fun delete(inventory: Inventory, assembly_id: ID, assembly_key: 
         ..,
     } = inventory;
 
+    // Burn items one by one
     while (!items.is_empty()) {
         let (_, entry) = items.pop();
         event::emit(ItemDestroyedEvent {
@@ -391,10 +392,11 @@ public(package) fun delete(inventory: Inventory, assembly_id: ID, assembly_key: 
 
 // === Private Functions ===
 
-/// Burns items from on-chain inventory (Chain → Game bridge).
-///
-/// Reduces quantity (or removes the entry entirely if fully burned) and frees
-/// the corresponding capacity. Emits an `ItemBurnedEvent` for the game server.
+// Burns items from on-chain inventory (Chain → Game bridge).
+//
+// Reduces quantity (or removes the entry entirely if fully burned) and frees
+// the corresponding capacity.
+// Emits an `ItemBurnedEvent` for the game server to recreate the item in-game (when necessary).
 fun burn_items(
     inventory: &mut Inventory,
     assembly_id: ID,
@@ -475,6 +477,7 @@ public fun burn_items_test(
     burn_items(inventory, assembly_id, assembly_key, character, type_id, quantity);
 }
 
+// Mocking without deadline
 #[test_only]
 public fun burn_items_with_proof_test(
     inventory: &mut Inventory,
