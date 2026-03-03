@@ -221,8 +221,6 @@ public(package) fun mint_items(
     quantity: u32,
 ) {
     assert!(type_id != 0, ETypeIdEmpty);
-
-<<<<<<< HEAD
     // Use stored volume when the type_id already exists (volume is static per type_id).
     let effective_volume = if (inventory.items.contains(&type_id)) {
         inventory.items[&type_id].volume
@@ -244,22 +242,6 @@ public(package) fun mint_items(
         item_id
     };
 
-=======
-    let req_capacity = calculate_volume(volume, quantity);
-    let remaining = inventory.max_capacity - inventory.used_capacity;
-    assert!(req_capacity <= remaining, EInventoryInsufficientCapacity);
-    inventory.used_capacity = inventory.used_capacity + req_capacity;
-
-    let emit_item_id = if (inventory.items.contains(&type_id)) {
-        let entry = &mut inventory.items[&type_id];
-        entry.quantity = entry.quantity + quantity;
-        entry.item_id
-    } else {
-        inventory.items.insert(type_id, ItemEntry { tenant, type_id, item_id, volume, quantity });
-        item_id
-    };
-
->>>>>>> 3d591d7 (**refactor**: Inventory Item split/join semantics, item teleportation fix via source/parent validation checking (#99))
     event::emit(ItemMintedEvent {
         assembly_id,
         assembly_key,
