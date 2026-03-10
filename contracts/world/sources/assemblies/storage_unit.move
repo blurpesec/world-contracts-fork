@@ -118,10 +118,7 @@ public fun authorize_extension<Auth: drop>(
 ) {
     let storage_unit_id = object::id(storage_unit);
     assert!(access::is_authorized(owner_cap, storage_unit_id), EAssemblyNotAuthorized);
-    assert!(
-        !extension_freeze::is_extension_frozen(&storage_unit.id),
-        EExtensionConfigFrozen,
-    );
+    assert!(!extension_freeze::is_extension_frozen(&storage_unit.id), EExtensionConfigFrozen);
     let previous_extension = storage_unit.extension;
     storage_unit.extension.swap_or_fill(type_name::with_defining_ids<Auth>());
     event::emit(ExtensionAuthorizedEvent {
@@ -143,10 +140,7 @@ public fun freeze_extension_config(
     let storage_unit_id = object::id(storage_unit);
     assert!(access::is_authorized(owner_cap, storage_unit_id), EAssemblyNotAuthorized);
     assert!(option::is_some(&storage_unit.extension), EExtensionNotConfigured);
-    assert!(
-        !extension_freeze::is_extension_frozen(&storage_unit.id),
-        EExtensionConfigFrozen,
-    );
+    assert!(!extension_freeze::is_extension_frozen(&storage_unit.id), EExtensionConfigFrozen);
     extension_freeze::freeze_extension_config(&mut storage_unit.id, storage_unit_id, ctx);
 }
 

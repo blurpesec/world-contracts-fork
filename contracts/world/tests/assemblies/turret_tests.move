@@ -1206,7 +1206,6 @@ fun test_update_metadata_turret_wrong_cap() {
     ts::end(ts);
 }
 
-
 #[test]
 #[expected_failure(abort_code = turret::EExtensionConfigFrozen)]
 fun authorize_extension_fails_after_freeze() {

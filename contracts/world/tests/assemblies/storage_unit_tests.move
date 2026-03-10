@@ -2335,7 +2335,6 @@ fun test_deposit_to_owned_fail_parent_id_mismatch() {
     ts::end(ts);
 }
 
-
 #[test]
 #[expected_failure(abort_code = storage_unit::EExtensionConfigFrozen)]
 fun test_authorize_extension_fails_after_freeze() {
