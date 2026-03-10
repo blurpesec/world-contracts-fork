@@ -22,6 +22,7 @@ use world::{
     access::{Self, OwnerCap, AdminACL},
     character::{Self, Character},
     energy::EnergyConfig,
+    extension_freeze,
     in_game_id::{Self, TenantItemId},
     location::{Self, Location, LocationRegistry},
     metadata::{Self, Metadata},
@@ -51,6 +52,10 @@ const EExtensionConfigured: vector<u8> = b"Extension is configured";
 const EInvalidOnlineReceipt: vector<u8> = b"Invalid online receipt";
 #[error(code = 9)]
 const EMetadataNotSet: vector<u8> = b"Metadata not set on assembly";
+#[error(code = 10)]
+const EExtensionConfigFrozen: vector<u8> = b"Extension configuration is frozen";
+#[error(code = 11)]
+const EExtensionNotConfigured: vector<u8> = b"Extension must be configured before freezing";
 
 // Priority weight increments applied by default rules (effective_weight_and_excluded)
 const STARTED_ATTACK_WEIGHT_INCREMENT: u64 = 10000;
@@ -144,6 +149,7 @@ public struct ExtensionAuthorizedEvent has copy, drop {
 public fun authorize_extension<Auth: drop>(turret: &mut Turret, owner_cap: &OwnerCap<Turret>) {
     let turret_id = object::id(turret);
     assert!(access::is_authorized(owner_cap, turret_id), ETurretNotAuthorized);
+    assert!(!extension_freeze::is_extension_frozen(&turret.id), EExtensionConfigFrozen);
     let previous_extension = turret.extension;
     turret.extension.swap_or_fill(type_name::with_defining_ids<Auth>());
     event::emit(ExtensionAuthorizedEvent {
@@ -153,6 +159,20 @@ public fun authorize_extension<Auth: drop>(turret: &mut Turret, owner_cap: &Owne
         previous_extension,
         owner_cap_id: object::id(owner_cap),
     });
+}
+
+/// Freezes the turret's extension configuration so the owner can no longer change it (builds user trust).
+/// Requires an extension to be configured. One-time; cannot be undone.
+public fun freeze_extension_config(
+    turret: &mut Turret,
+    owner_cap: &OwnerCap<Turret>,
+    ctx: &mut TxContext,
+) {
+    let turret_id = object::id(turret);
+    assert!(access::is_authorized(owner_cap, turret_id), ETurretNotAuthorized);
+    assert!(option::is_some(&turret.extension), EExtensionNotConfigured);
+    assert!(!extension_freeze::is_extension_frozen(&turret.id), EExtensionConfigFrozen);
+    extension_freeze::freeze_extension_config(&mut turret.id, turret_id, ctx);
 }
 
 public fun online(
@@ -404,6 +424,11 @@ public fun extension_type(turret: &Turret): TypeName {
 /// Returns true if the turret is configured with extension logic
 public fun is_extension_configured(turret: &Turret): bool {
     option::is_some(&turret.extension)
+}
+
+/// Returns true if the turret's extension configuration is frozen (owner cannot change extension).
+public fun is_extension_frozen(turret: &Turret): bool {
+    extension_freeze::is_extension_frozen(&turret.id)
 }
 
 public fun type_id(turret: &Turret): u64 {
