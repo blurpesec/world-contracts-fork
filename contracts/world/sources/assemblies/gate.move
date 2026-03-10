@@ -159,16 +159,12 @@ public fun authorize_extension<Auth: drop>(gate: &mut Gate, owner_cap: &OwnerCap
 
 /// Freezes the gate's extension configuration so the owner can no longer change it (builds user trust).
 /// Requires an extension to be configured. One-time; cannot be undone.
-public fun freeze_extension_config(
-    gate: &mut Gate,
-    owner_cap: &OwnerCap<Gate>,
-    ctx: &mut TxContext,
-) {
+public fun freeze_extension_config(gate: &mut Gate, owner_cap: &OwnerCap<Gate>) {
     let gate_id = object::id(gate);
     assert!(access::is_authorized(owner_cap, gate_id), EGateNotAuthorized);
     assert!(option::is_some(&gate.extension), EExtensionNotConfigured);
     assert!(!extension_freeze::is_extension_frozen(&gate.id), EExtensionConfigFrozen);
-    extension_freeze::freeze_extension_config(&mut gate.id, gate_id, ctx);
+    extension_freeze::freeze_extension_config(&mut gate.id, gate_id);
 }
 
 public fun online(
@@ -603,7 +599,7 @@ public fun unanchor(
 ) {
     admin_acl.verify_sponsor(ctx);
     let Gate {
-        id,
+        mut id,
         key,
         status,
         location,
@@ -631,6 +627,7 @@ public fun unanchor(
     status.unanchor(gate_id, key);
 
     // TODO: drop everything
+    extension_freeze::remove_frozen_marker_if_present(&mut id);
     location.remove();
     metadata.do!(|metadata| metadata.delete());
     let _ = option::destroy_with_default(energy_source_id, nwn_id);
@@ -640,7 +637,7 @@ public fun unanchor(
 public fun unanchor_orphan(gate: Gate, admin_acl: &AdminACL, ctx: &TxContext) {
     admin_acl.verify_sponsor(ctx);
     let Gate {
-        id,
+        mut id,
         key,
         status,
         location,
@@ -657,6 +654,7 @@ public fun unanchor_orphan(gate: Gate, admin_acl: &AdminACL, ctx: &TxContext) {
 
     let gate_id = object::uid_to_inner(&id);
     status.unanchor(gate_id, key);
+    extension_freeze::remove_frozen_marker_if_present(&mut id);
     location.remove();
     metadata.do!(|metadata| metadata.delete());
     id.delete();

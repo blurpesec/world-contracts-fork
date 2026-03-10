@@ -13,9 +13,7 @@ use sui::{dynamic_field as df, event};
 public struct ExtensionFrozenKey has copy, drop, store {}
 
 /// Marker value stored as a dynamic field when extension config is frozen.
-public struct ExtensionFrozen has key, store {
-    id: UID,
-}
+public struct ExtensionFrozen has copy, drop, store {}
 
 /// Emitted when an assembly's extension configuration is frozen.
 public struct ExtensionConfigFrozenEvent has copy, drop {
@@ -29,7 +27,14 @@ public fun is_extension_frozen(object: &UID): bool {
 
 /// Adds the frozen marker and emits the event. Call from Gate/Turret/StorageUnit after auth and extension checks.
 /// One-time and irreversible: the assembly will stay on this extension package; no upgrade path if the extension has a bug.
-public fun freeze_extension_config(parent: &mut UID, assembly_id: ID, ctx: &mut TxContext) {
-    df::add(parent, ExtensionFrozenKey {}, ExtensionFrozen { id: object::new(ctx) });
+public fun freeze_extension_config(parent: &mut UID, assembly_id: ID) {
+    df::add(parent, ExtensionFrozenKey {}, ExtensionFrozen {});
     event::emit(ExtensionConfigFrozenEvent { assembly_id });
+}
+
+/// Removes the frozen marker if present. Call from Gate/Turret/StorageUnit unanchor/unanchor_orphan before deleting the assembly UID so DF storage is cleaned up.
+public fun remove_frozen_marker_if_present(parent: &mut UID) {
+    if (df::exists_<ExtensionFrozenKey>(parent, ExtensionFrozenKey {})) {
+        let _ = df::remove<ExtensionFrozenKey, ExtensionFrozen>(parent, ExtensionFrozenKey {});
+    };
 }

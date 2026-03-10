@@ -135,13 +135,12 @@ public fun authorize_extension<Auth: drop>(
 public fun freeze_extension_config(
     storage_unit: &mut StorageUnit,
     owner_cap: &OwnerCap<StorageUnit>,
-    ctx: &mut TxContext,
 ) {
     let storage_unit_id = object::id(storage_unit);
     assert!(access::is_authorized(owner_cap, storage_unit_id), EAssemblyNotAuthorized);
     assert!(option::is_some(&storage_unit.extension), EExtensionNotConfigured);
     assert!(!extension_freeze::is_extension_frozen(&storage_unit.id), EExtensionConfigFrozen);
-    extension_freeze::freeze_extension_config(&mut storage_unit.id, storage_unit_id, ctx);
+    extension_freeze::freeze_extension_config(&mut storage_unit.id, storage_unit_id);
 }
 
 public fun online(
@@ -675,6 +674,7 @@ public fun unanchor(
             key,
         ),
     );
+    extension_freeze::remove_frozen_marker_if_present(&mut id);
     metadata.do!(|metadata| metadata.delete());
     let _ = option::destroy_with_default(energy_source_id, object::id(network_node));
     id.delete();
@@ -702,6 +702,7 @@ public fun unanchor_orphan(storage_unit: StorageUnit, admin_acl: &AdminACL, ctx:
         ),
     );
     status.unanchor(storage_unit_id, key);
+    extension_freeze::remove_frozen_marker_if_present(&mut id);
     metadata.do!(|metadata| metadata.delete());
     option::destroy_none(energy_source_id);
 

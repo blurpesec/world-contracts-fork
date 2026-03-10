@@ -163,16 +163,12 @@ public fun authorize_extension<Auth: drop>(turret: &mut Turret, owner_cap: &Owne
 
 /// Freezes the turret's extension configuration so the owner can no longer change it (builds user trust).
 /// Requires an extension to be configured. One-time; cannot be undone.
-public fun freeze_extension_config(
-    turret: &mut Turret,
-    owner_cap: &OwnerCap<Turret>,
-    ctx: &mut TxContext,
-) {
+public fun freeze_extension_config(turret: &mut Turret, owner_cap: &OwnerCap<Turret>) {
     let turret_id = object::id(turret);
     assert!(access::is_authorized(owner_cap, turret_id), ETurretNotAuthorized);
     assert!(option::is_some(&turret.extension), EExtensionNotConfigured);
     assert!(!extension_freeze::is_extension_frozen(&turret.id), EExtensionConfigFrozen);
-    extension_freeze::freeze_extension_config(&mut turret.id, turret_id, ctx);
+    extension_freeze::freeze_extension_config(&mut turret.id, turret_id);
 }
 
 public fun online(
@@ -578,7 +574,7 @@ public fun unanchor(
 ) {
     admin_acl.verify_sponsor(ctx);
     let Turret {
-        id,
+        mut id,
         key,
         status,
         location,
@@ -602,6 +598,7 @@ public fun unanchor(
     status.unanchor(turret_id, key);
 
     // TODO: drop everything
+    extension_freeze::remove_frozen_marker_if_present(&mut id);
     location.remove();
     metadata.do!(|metadata| metadata.delete());
     let _ = option::destroy_with_default(energy_source_id, nwn_id);
@@ -611,7 +608,7 @@ public fun unanchor(
 public fun unanchor_orphan(turret: Turret, admin_acl: &AdminACL, ctx: &TxContext) {
     admin_acl.verify_sponsor(ctx);
     let Turret {
-        id,
+        mut id,
         key,
         status,
         location,
@@ -625,6 +622,7 @@ public fun unanchor_orphan(turret: Turret, admin_acl: &AdminACL, ctx: &TxContext
 
     let turret_id = object::uid_to_inner(&id);
     status.unanchor(turret_id, key);
+    extension_freeze::remove_frozen_marker_if_present(&mut id);
     location.remove();
     metadata.do!(|metadata| metadata.delete());
     id.delete();

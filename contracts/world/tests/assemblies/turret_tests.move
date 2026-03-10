@@ -397,7 +397,7 @@ fun freeze_extension_config_succeeds() {
             ts.ctx(),
         );
         turret.authorize_extension<TurretAuth>(&owner_cap);
-        turret.freeze_extension_config(&owner_cap, ts.ctx());
+        turret.freeze_extension_config(&owner_cap);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
         ts::return_shared(turret);
@@ -1225,7 +1225,7 @@ fun authorize_extension_fails_after_freeze() {
             ts.ctx(),
         );
         turret.authorize_extension<TurretAuth>(&owner_cap);
-        turret.freeze_extension_config(&owner_cap, ts.ctx());
+        turret.freeze_extension_config(&owner_cap);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
         ts::return_shared(turret);
@@ -1265,7 +1265,7 @@ fun freeze_extension_config_fails_when_no_extension() {
             ts::receiving_ticket_by_id<OwnerCap<Turret>>(turret.owner_cap_id()),
             ts.ctx(),
         );
-        turret.freeze_extension_config(&owner_cap, ts.ctx());
+        turret.freeze_extension_config(&owner_cap);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
         ts::return_shared(turret);
@@ -1308,7 +1308,7 @@ fun freeze_extension_config_fails_unauthorized() {
             ts::receiving_ticket_by_id<OwnerCap<Turret>>(turret_b.owner_cap_id()),
             ts.ctx(),
         );
-        turret_a.freeze_extension_config(&owner_cap_b, ts.ctx());
+        turret_a.freeze_extension_config(&owner_cap_b);
         character_b.return_owner_cap(owner_cap_b, receipt_b);
         ts::return_shared(character_b);
         ts::return_shared(turret_a);

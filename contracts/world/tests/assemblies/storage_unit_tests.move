@@ -646,7 +646,7 @@ fun freeze_extension_config_succeeds() {
             ts.ctx(),
         );
         storage_unit.authorize_extension<SwapAuth>(&owner_cap);
-        storage_unit.freeze_extension_config(&owner_cap, ts.ctx());
+        storage_unit.freeze_extension_config(&owner_cap);
         ts::return_shared(storage_unit);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
@@ -2359,7 +2359,7 @@ fun test_authorize_extension_fails_after_freeze() {
             ts.ctx(),
         );
         storage_unit.authorize_extension<SwapAuth>(&owner_cap);
-        storage_unit.freeze_extension_config(&owner_cap, ts.ctx());
+        storage_unit.freeze_extension_config(&owner_cap);
         ts::return_shared(storage_unit);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
@@ -2404,7 +2404,7 @@ fun test_freeze_extension_config_fails_when_no_extension() {
             ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_id),
             ts.ctx(),
         );
-        storage_unit.freeze_extension_config(&owner_cap, ts.ctx());
+        storage_unit.freeze_extension_config(&owner_cap);
         ts::return_shared(storage_unit);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
@@ -2458,7 +2458,7 @@ fun test_freeze_extension_config_fails_unauthorized() {
             ts::most_recent_receiving_ticket<OwnerCap<StorageUnit>>(&character_b_id),
             ts.ctx(),
         );
-        storage_a.freeze_extension_config(&owner_cap_b, ts.ctx());
+        storage_a.freeze_extension_config(&owner_cap_b);
         ts::return_shared(storage_a);
         ts::return_shared(storage_b);
         character_b.return_owner_cap(owner_cap_b, receipt_b);

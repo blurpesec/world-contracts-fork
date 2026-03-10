@@ -373,7 +373,7 @@ fun freeze_extension_config_succeeds() {
         let owner_cap_id = gate_obj.owner_cap_id();
         let gate_ticket = ts::receiving_ticket_by_id<OwnerCap<Gate>>(owner_cap_id);
         let (owner_cap, receipt) = character.borrow_owner_cap<Gate>(gate_ticket, ts.ctx());
-        gate_obj.freeze_extension_config(&owner_cap, ts.ctx());
+        gate_obj.freeze_extension_config(&owner_cap);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
         ts::return_shared(gate_obj);
@@ -667,7 +667,7 @@ fun authorize_extension_fails_after_freeze() {
             ts::receiving_ticket_by_id<OwnerCap<Gate>>(gate_obj.owner_cap_id()),
             ts.ctx(),
         );
-        gate_obj.freeze_extension_config(&owner_cap, ts.ctx());
+        gate_obj.freeze_extension_config(&owner_cap);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
         ts::return_shared(gate_obj);
@@ -695,7 +695,7 @@ fun freeze_extension_config_fails_when_no_extension() {
             ts::receiving_ticket_by_id<OwnerCap<Gate>>(gate_obj.owner_cap_id()),
             ts.ctx(),
         );
-        gate_obj.freeze_extension_config(&owner_cap, ts.ctx());
+        gate_obj.freeze_extension_config(&owner_cap);
         character.return_owner_cap(owner_cap, receipt);
         ts::return_shared(character);
         ts::return_shared(gate_obj);
@@ -726,7 +726,7 @@ fun freeze_extension_config_fails_unauthorized() {
             ts::receiving_ticket_by_id<OwnerCap<Gate>>(gate_b.owner_cap_id()),
             ts.ctx(),
         );
-        gate_a.freeze_extension_config(&owner_cap_b, ts.ctx());
+        gate_a.freeze_extension_config(&owner_cap_b);
         character_b.return_owner_cap(owner_cap_b, receipt_b);
         ts::return_shared(character_b);
         ts::return_shared(gate_a);
