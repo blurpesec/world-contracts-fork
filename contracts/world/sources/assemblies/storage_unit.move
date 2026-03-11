@@ -27,8 +27,8 @@
 /// Future pattern: Storage Units (extension-controlled), Ships (owner-controlled)
 module world::storage_unit;
 
-use std::{bcs, hash, string::String, type_name::{Self, TypeName}};
-use sui::{address, clock::Clock, derived_object, dynamic_field as df, event};
+use std::{bcs, string::String, type_name::{Self, TypeName}};
+use sui::{address, clock::Clock, derived_object, dynamic_field as df, event, hash};
 use world::{
     access::{Self, OwnerCap, ServerAddressRegistry, AdminACL},
     character::Character,
@@ -838,7 +838,7 @@ public fun game_item_to_chain_inventory<T: key>(
 fun open_storage_key_from_id(storage_unit_id: ID): ID {
     let mut storage_unit_id_bytes = bcs::to_bytes(&storage_unit_id);
     vector::append(&mut storage_unit_id_bytes, b"open_inventory");
-    let digest = hash::sha3_256(storage_unit_id_bytes);
+    let digest = hash::blake2b256(&storage_unit_id_bytes);
     let addr = address::from_bytes(digest);
     object::id_from_address(addr)
 }

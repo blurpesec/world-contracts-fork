@@ -2172,7 +2172,7 @@ fun deposit_to_owned_creates_owned_inventory() {
     ts::end(ts);
 }
 
-/// Test open storage: only extension can deposit/withdraw; creates open inventory on first deposit
+/// Test open storage: only extension can deposit/withdraw; open inventory is created during anchor.
 #[test]
 fun deposit_to_open_and_withdraw_from_open() {
     let mut ts = ts::begin(governor());
