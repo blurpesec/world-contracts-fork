@@ -297,6 +297,8 @@ public fun deposit_to_open_inventory<Auth: drop>(
     assert!(inventory::tenant(&item) == storage_unit.key.tenant(), ETenantMismatch);
     assert!(inventory::parent_id(&item) == storage_unit_id, EItemParentMismatch);
 
+    ensure_open_inventory(storage_unit);
+
     let key = open_storage_key(storage_unit);
     let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, key);
     inventory.deposit_item(
@@ -839,6 +841,20 @@ fun open_storage_key_from_id(storage_unit_id: ID): ID {
     let digest = hash::sha3_256(storage_unit_id_bytes);
     let addr = address::from_bytes(digest);
     object::id_from_address(addr)
+}
+
+/// Creates the open inventory if it does not exist (backward compat for SSUs anchored before open storage existed).
+fun ensure_open_inventory(storage_unit: &mut StorageUnit) {
+    let key = open_storage_key(storage_unit);
+    if (!df::exists_(&storage_unit.id, key)) {
+        let owner_inv = df::borrow<ID, Inventory>(
+            &storage_unit.id,
+            storage_unit.owner_cap_id,
+        );
+        let open_inventory = inventory::create(owner_inv.max_capacity());
+        storage_unit.inventory_keys.push_back(key);
+        df::add(&mut storage_unit.id, key, open_inventory);
+    };
 }
 
 fun bring_offline_and_release_energy(
