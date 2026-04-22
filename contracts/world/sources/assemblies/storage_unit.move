@@ -270,9 +270,10 @@ public fun deposit_item<Auth: drop>(
         &mut storage_unit.id,
         storage_unit.owner_cap_id,
     );
-    inventory.deposit_item(
+    inventory.deposit_item_to_inventory(
         storage_unit_id,
         storage_unit.key,
+        storage_unit.owner_cap_id,
         character,
         item,
     );
@@ -298,9 +299,10 @@ public fun withdraw_item<Auth: drop>(
         storage_unit.owner_cap_id,
     );
 
-    inventory.withdraw_item(
+    inventory.withdraw_item_from_inventory(
         storage_unit_id,
         storage_unit.key,
+        storage_unit.owner_cap_id,
         character,
         type_id,
         quantity,
@@ -332,9 +334,10 @@ public fun deposit_to_open_inventory<Auth: drop>(
 
     let key = open_storage_key(storage_unit);
     let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, key);
-    inventory.deposit_item(
+    inventory.deposit_item_to_inventory(
         storage_unit_id,
         storage_unit.key,
+        key,
         character,
         item,
     );
@@ -360,9 +363,10 @@ public fun withdraw_from_open_inventory<Auth: drop>(
     assert!(df::exists_(&storage_unit.id, key), EOpenStorageNotInitialized);
 
     let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, key);
-    inventory.withdraw_item(
+    inventory.withdraw_item_from_inventory(
         storage_unit_id,
         storage_unit.key,
+        key,
         character,
         type_id,
         quantity,
@@ -409,9 +413,10 @@ public fun deposit_to_owned<Auth: drop>(
         &mut storage_unit.id,
         owner_cap_id,
     );
-    inventory.deposit_item(
+    inventory.deposit_item_to_inventory(
         storage_unit_id,
         storage_unit.key,
+        owner_cap_id,
         character,
         item,
     );
@@ -437,9 +442,10 @@ public fun deposit_by_owner<T: key>(
         owner_cap_id,
     );
 
-    inventory.deposit_item(
+    inventory.deposit_item_to_inventory(
         storage_unit_id,
         storage_unit.key,
+        owner_cap_id,
         character,
         item,
     );
@@ -464,9 +470,10 @@ public fun withdraw_by_owner<T: key>(
         owner_cap_id,
     );
 
-    inventory.withdraw_item(
+    inventory.withdraw_item_from_inventory(
         storage_unit_id,
         storage_unit.key,
+        owner_cap_id,
         character,
         type_id,
         quantity,

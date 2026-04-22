@@ -421,9 +421,10 @@ public fun deposit_item_merges_quantity_when_same_type_id() {
         let character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
         let character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
         let inv_b = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_b_id);
-        let item = inv_b.withdraw_item(
+        let item = inv_b.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_b_id,
             &character_b,
             AMMO_TYPE_ID,
             3u32,
@@ -431,7 +432,13 @@ public fun deposit_item_merges_quantity_when_same_type_id() {
             ts.ctx(),
         );
         let inv_a = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
-        inv_a.deposit_item(assembly_id, assembly_key, &character_a, item);
+        inv_a.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_a_id,
+            &character_a,
+            item,
+        );
         ts::return_shared(character_a);
         ts::return_shared(character_b);
         ts::return_shared(storage_unit);
@@ -507,9 +514,10 @@ public fun deposit_items() {
         let character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
         let character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
-        let item = inventory.withdraw_item(
+        let item = inventory.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_a_id,
             &character_a,
             AMMO_TYPE_ID,
             AMMO_QUANTITY,
@@ -526,7 +534,13 @@ public fun deposit_items() {
             &mut storage_unit.id,
             character_b_id,
         );
-        eph_inventory.deposit_item(assembly_id, assembly_key, &character_b, item);
+        eph_inventory.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_b_id,
+            &character_b,
+            item,
+        );
         ts::return_shared(character_a);
         ts::return_shared(character_b);
 
@@ -648,9 +662,10 @@ fun withdraw_partial_quantity() {
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
 
-        let item = inventory.withdraw_item(
+        let item = inventory.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_id,
             &character,
             AMMO_TYPE_ID,
             5u32,
@@ -670,7 +685,13 @@ fun withdraw_partial_quantity() {
 
         // Deposit back to clean up the item
         let inv_mut = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        inv_mut.deposit_item(assembly_id, assembly_key, &character, item);
+        inv_mut.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_id,
+            &character,
+            item,
+        );
 
         ts::return_shared(storage_unit);
         ts::return_shared(character);
@@ -709,9 +730,10 @@ fun round_trip_split_join_df_quantities() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        let item = inventory.withdraw_item(
+        let item = inventory.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_id,
             &character,
             AMMO_TYPE_ID,
             3u32,
@@ -738,7 +760,13 @@ fun round_trip_split_join_df_quantities() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        inventory.deposit_item(assembly_id, assembly_key, &character, item);
+        inventory.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_id,
+            &character,
+            item,
+        );
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_id);
         assert_eq!(inv_ref.item_quantity(AMMO_TYPE_ID), AMMO_QUANTITY);
@@ -758,9 +786,10 @@ fun round_trip_split_join_df_quantities() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        let item = inventory.withdraw_item(
+        let item = inventory.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_id,
             &character,
             AMMO_TYPE_ID,
             AMMO_QUANTITY,
@@ -786,7 +815,13 @@ fun round_trip_split_join_df_quantities() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        inventory.deposit_item(assembly_id, assembly_key, &character, item);
+        inventory.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_id,
+            &character,
+            item,
+        );
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_id);
         assert_eq!(inv_ref.item_quantity(AMMO_TYPE_ID), AMMO_QUANTITY);
@@ -939,9 +974,10 @@ fun deposit_ignores_volume_change() {
         let character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
         let character_b = ts::take_shared_by_id<Character>(&ts, character_b_id);
         let inv_b = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_b_id);
-        let item = inv_b.withdraw_item(
+        let item = inv_b.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_b_id,
             &character_b,
             AMMO_TYPE_ID,
             3u32,
@@ -949,7 +985,13 @@ fun deposit_ignores_volume_change() {
             ts.ctx(),
         );
         let inv_a = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
-        inv_a.deposit_item(assembly_id, assembly_key, &character_a, item);
+        inv_a.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_a_id,
+            &character_a,
+            item,
+        );
         ts::return_shared(character_a);
         ts::return_shared(character_b);
         ts::return_shared(storage_unit);
@@ -990,9 +1032,10 @@ fun round_trip_capacity_consistent_with_static_volume() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        let item = inventory.withdraw_item(
+        let item = inventory.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_id,
             &character,
             AMMO_TYPE_ID,
             5u32,
@@ -1016,7 +1059,13 @@ fun round_trip_capacity_consistent_with_static_volume() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        inventory.deposit_item(assembly_id, assembly_key, &character, item);
+        inventory.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_id,
+            &character,
+            item,
+        );
 
         let inv_ref = df::borrow<ID, Inventory>(&storage_unit.id, character_id);
         assert_eq!(inv_ref.item_quantity(AMMO_TYPE_ID), 10);
@@ -1035,9 +1084,10 @@ fun round_trip_capacity_consistent_with_static_volume() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        let item = inventory.withdraw_item(
+        let item = inventory.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_id,
             &character,
             AMMO_TYPE_ID,
             10u32,
@@ -1051,7 +1101,13 @@ fun round_trip_capacity_consistent_with_static_volume() {
         assert_eq!(inv_ref.inventory_item_length(), 0);
 
         let inv_mut = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        inv_mut.deposit_item(assembly_id, assembly_key, &character, item);
+        inv_mut.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_id,
+            &character,
+            item,
+        );
 
         ts::return_shared(storage_unit);
         ts::return_shared(character);
@@ -1229,9 +1285,10 @@ fun deposit_item_fail_insufficient_capacity() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character_a = ts::take_shared_by_id<Character>(&ts, character_a_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_a_id);
-        let item = inventory.withdraw_item(
+        let item = inventory.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_a_id,
             &character_a,
             AMMO_TYPE_ID,
             AMMO_QUANTITY,
@@ -1253,7 +1310,13 @@ fun deposit_item_fail_insufficient_capacity() {
             &mut storage_unit.id,
             character_b_id,
         );
-        eph_inventory.deposit_item(assembly_id, assembly_key, &character_b, item);
+        eph_inventory.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_b_id,
+            &character_b,
+            item,
+        );
         ts::return_shared(storage_unit);
         ts::return_shared(character_b);
     };
@@ -1280,9 +1343,10 @@ fun withdraw_item_fail_item_not_found() {
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         // This should abort with EItemDoesNotExist
-        let item = inventory.withdraw_item(
+        let item = inventory.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_id,
             &character,
             1222,
             AMMO_QUANTITY,
@@ -1290,7 +1354,13 @@ fun withdraw_item_fail_item_not_found() {
             ts.ctx(),
         );
         // Unreachable code below - needed to satisfy Move's type checker
-        inventory.deposit_item(assembly_id, assembly_key, &character, item);
+        inventory.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_id,
+            &character,
+            item,
+        );
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -1318,16 +1388,23 @@ fun withdraw_fail_zero_quantity() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        let item = inventory.withdraw_item(
+        let item = inventory.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_id,
             &character,
             AMMO_TYPE_ID,
             0u32,
             LOCATION_A_HASH,
             ts.ctx(),
         );
-        inventory.deposit_item(assembly_id, assembly_key, &character, item);
+        inventory.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_id,
+            &character,
+            item,
+        );
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };
@@ -1355,16 +1432,23 @@ fun withdraw_fail_exceeds_quantity() {
         let assembly_key = in_game_id::create_key(STORAGE_ITEM_ID, tenant());
         let character = ts::take_shared_by_id<Character>(&ts, character_id);
         let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, character_id);
-        let item = inventory.withdraw_item(
+        let item = inventory.withdraw_item_from_inventory(
             assembly_id,
             assembly_key,
+            character_id,
             &character,
             AMMO_TYPE_ID,
             15u32,
             LOCATION_A_HASH,
             ts.ctx(),
         );
-        inventory.deposit_item(assembly_id, assembly_key, &character, item);
+        inventory.deposit_item_to_inventory(
+            assembly_id,
+            assembly_key,
+            character_id,
+            &character,
+            item,
+        );
         ts::return_shared(storage_unit);
         ts::return_shared(character);
     };

@@ -136,9 +136,31 @@ public struct ItemDepositedEvent has copy, drop {
     quantity: u32,
 }
 
+public struct ItemDepositedEventV2 has copy, drop {
+    assembly_id: ID,
+    assembly_key: TenantItemId,
+    inventory_key: ID,
+    character_id: ID,
+    character_key: TenantItemId,
+    item_id: u64,
+    type_id: u64,
+    quantity: u32,
+}
+
 public struct ItemWithdrawnEvent has copy, drop {
     assembly_id: ID,
     assembly_key: TenantItemId,
+    character_id: ID,
+    character_key: TenantItemId,
+    item_id: u64,
+    type_id: u64,
+    quantity: u32,
+}
+
+public struct ItemWithdrawnEventV2 has copy, drop {
+    assembly_id: ID,
+    assembly_key: TenantItemId,
+    inventory_key: ID,
     character_id: ID,
     character_key: TenantItemId,
     item_id: u64,
@@ -336,6 +358,54 @@ public(package) fun deposit_item(
     });
 }
 
+public(package) fun deposit_item_to_inventory(
+    inventory: &mut Inventory,
+    assembly_id: ID,
+    assembly_key: TenantItemId,
+    inventory_key: ID,
+    character: &Character,
+    item: Item,
+) {
+    let Item { id, parent_id: _, tenant, type_id, item_id, volume, quantity, location } = item;
+    id.delete();
+    location.remove();
+
+    // Use stored volume when the type_id already exists (volume is static per type_id).
+    let effective_volume = if (inventory.items.contains(&type_id)) {
+        inventory.items[&type_id].volume
+    } else {
+        volume
+    };
+
+    let req_capacity = calculate_volume(effective_volume, quantity);
+    let remaining = inventory.max_capacity - inventory.used_capacity;
+    assert!(req_capacity <= remaining, EInventoryInsufficientCapacity);
+    inventory.used_capacity = inventory.used_capacity + req_capacity;
+
+    let entry = ItemEntry { tenant, type_id, item_id, volume, quantity };
+
+    let dep_item_id = if (inventory.items.contains(&type_id)) {
+        let existing = &mut inventory.items[&type_id];
+        let existing_item_id = existing.item_id;
+        existing.join(entry);
+        existing_item_id
+    } else {
+        inventory.items.insert(type_id, entry);
+        item_id
+    };
+
+    event::emit(ItemDepositedEventV2 {
+        assembly_id,
+        assembly_key,
+        inventory_key,
+        character_id: character.id(),
+        character_key: character.key(),
+        item_id: dep_item_id,
+        type_id,
+        quantity,
+    });
+}
+
 // Withdraws items from the inventory and wraps them into a transit `Item`.
 //
 // `location_hash` is injected by the parent layer (e.g. StorageUnit) — it is not
@@ -374,6 +444,65 @@ public(package) fun withdraw_item(
     event::emit(ItemWithdrawnEvent {
         assembly_id,
         assembly_key,
+        character_id: character.id(),
+        character_key: character.key(),
+        item_id,
+        type_id,
+        quantity,
+    });
+
+    Item {
+        id: object::new(ctx),
+        parent_id: assembly_id,
+        tenant,
+        type_id,
+        item_id,
+        volume,
+        quantity,
+        location: location::attach(location_hash),
+    }
+}
+
+// Withdraws items from the inventory and wraps them into a transit `Item`.
+//
+// `location_hash` is injected by the parent layer (e.g. StorageUnit) — it is not
+// stored in `ItemEntry` since it is just-in-time metadata for the transit `Item`.
+//
+// `assembly_id` doubles as the `parent_id` on the resulting `Item`.
+public(package) fun withdraw_item_from_inventory(
+    inventory: &mut Inventory,
+    assembly_id: ID,
+    assembly_key: TenantItemId,
+    inventory_key: ID,
+    character: &Character,
+    type_id: u64,
+    quantity: u32,
+    location_hash: vector<u8>,
+    ctx: &mut TxContext,
+): Item {
+    assert!(inventory.items.contains(&type_id), EItemDoesNotExist);
+    assert!(quantity > 0, ESplitQuantityInvalid);
+
+    let entry = &inventory.items[&type_id];
+    assert!(entry.quantity >= quantity, EInventoryInsufficientQuantity);
+    let volume = entry.volume;
+    let item_id = entry.item_id;
+    let tenant = entry.tenant;
+
+    let capacity_freed = calculate_volume(volume, quantity);
+    inventory.used_capacity = inventory.used_capacity - capacity_freed;
+
+    if (entry.quantity == quantity) {
+        inventory.items.remove(&type_id);
+    } else {
+        let entry_mut = &mut inventory.items[&type_id];
+        entry_mut.quantity = entry_mut.quantity - quantity;
+    };
+
+    event::emit(ItemWithdrawnEventV2 {
+        assembly_id,
+        assembly_key,
+        inventory_key,
         character_id: character.id(),
         character_key: character.key(),
         item_id,
