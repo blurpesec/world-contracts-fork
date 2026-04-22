@@ -270,7 +270,7 @@ public fun deposit_item<Auth: drop>(
         &mut storage_unit.id,
         storage_unit.owner_cap_id,
     );
-    inventory.deposit_item_to_inventory(
+    inventory.deposit_item(
         storage_unit_id,
         storage_unit.key,
         storage_unit.owner_cap_id,
@@ -299,7 +299,7 @@ public fun withdraw_item<Auth: drop>(
         storage_unit.owner_cap_id,
     );
 
-    inventory.withdraw_item_from_inventory(
+    inventory.withdraw_item(
         storage_unit_id,
         storage_unit.key,
         storage_unit.owner_cap_id,
@@ -334,7 +334,7 @@ public fun deposit_to_open_inventory<Auth: drop>(
 
     let key = open_storage_key(storage_unit);
     let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, key);
-    inventory.deposit_item_to_inventory(
+    inventory.deposit_item(
         storage_unit_id,
         storage_unit.key,
         key,
@@ -363,7 +363,7 @@ public fun withdraw_from_open_inventory<Auth: drop>(
     assert!(df::exists_(&storage_unit.id, key), EOpenStorageNotInitialized);
 
     let inventory = df::borrow_mut<ID, Inventory>(&mut storage_unit.id, key);
-    inventory.withdraw_item_from_inventory(
+    inventory.withdraw_item(
         storage_unit_id,
         storage_unit.key,
         key,
@@ -413,7 +413,7 @@ public fun deposit_to_owned<Auth: drop>(
         &mut storage_unit.id,
         owner_cap_id,
     );
-    inventory.deposit_item_to_inventory(
+    inventory.deposit_item(
         storage_unit_id,
         storage_unit.key,
         owner_cap_id,
@@ -442,7 +442,7 @@ public fun deposit_by_owner<T: key>(
         owner_cap_id,
     );
 
-    inventory.deposit_item_to_inventory(
+    inventory.deposit_item(
         storage_unit_id,
         storage_unit.key,
         owner_cap_id,
@@ -470,7 +470,7 @@ public fun withdraw_by_owner<T: key>(
         owner_cap_id,
     );
 
-    inventory.withdraw_item_from_inventory(
+    inventory.withdraw_item(
         storage_unit_id,
         storage_unit.key,
         owner_cap_id,
