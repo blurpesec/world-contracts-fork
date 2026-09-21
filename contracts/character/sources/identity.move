@@ -6,12 +6,7 @@
 /// multiple addresses can be bound to a single character.
 module character::identity;
 
-use core::{
-    component::{Self, Component},
-    entity::Entity,
-    entity_key::EntityKey,
-    request::Request
-};
+use core::{component::{Self, Component}, entity::Entity, entity_key::EntityKey, request::Request};
 use std::{internal::Permit, string::{Self, String}};
 use sui::event;
 
