@@ -32,7 +32,7 @@ public struct Identity has store {
 // === Events ===
 
 /// Emitted when identity is installed on an entity, i.e. when it becomes a character.
-public struct CharacterCreatedEvent has copy, drop {
+public struct CharacterCreated has copy, drop {
     character_id: ID,
     key: EntityKey,
     tribe_id: u32,
@@ -72,7 +72,7 @@ public fun install(
         ctx,
     );
 
-    event::emit(CharacterCreatedEvent {
+    event::emit(CharacterCreated {
         character_id: entity.id(),
         key: entity.key(),
         tribe_id,

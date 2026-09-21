@@ -1,7 +1,7 @@
 #[test_only]
 module character::character_tests;
 
-use character::identity::{Self, CharacterCreatedEvent};
+use character::identity::{Self, CharacterCreated};
 use core::{
     admin_service::{Self, AdminACL},
     component,
@@ -99,7 +99,7 @@ fun create_emits_character_created() {
     ts::next_tx(&mut scenario, ADMIN);
     create_character(&mut scenario, IN_GAME_ID, tenant(), TRIBE_ID, OWNER);
 
-    assert!(event::events_by_type<CharacterCreatedEvent>().length() == 1);
+    assert!(event::events_by_type<CharacterCreated>().length() == 1);
 
     scenario.end();
 }
