@@ -67,15 +67,8 @@ public struct Withdrawal(ItemRequirement) has drop;
 
 // === Events ===
 
-/// An inventory now exists at `(entity_id, component_id)` and will hold balances
-/// until `InventoryUninstalled`. `capacity` and the inventory's own kind are set
-/// here and reach the wire nowhere else, so nothing downstream can size an
-/// inventory — or even know an as-yet-unused one exists — until this is emitted.
-/// Because `component_id` is caller-chosen and reusable, the pair also separates
-/// one inventory from the next under the same key: an uninstall-then-reinstall is
-/// a *different* inventory, with a fresh bag and possibly a different capacity.
-/// `inventory_type_id` reads `Inventory.type_id` — the inventory's own kind,
-/// never an item type; it is named apart so `type_id` means one thing on the wire.
+/// Emitted when an inventory is installed. `inventory_type_id` is the
+/// inventory's own kind (`Inventory.type_id`), never an item type.
 public struct InventoryInstalled has copy, drop {
     entity_id: ID,
     component_id: u64,
@@ -84,13 +77,9 @@ public struct InventoryInstalled has copy, drop {
     capacity: u64,
 }
 
-/// `uninstall` dropped the whole inventory: every balance under this
-/// `(entity_id, component_id)` ceased to exist, and unlike a bridge `ItemBurned`
-/// none of it returned to the game. Emitted *before* the per-type burns it
-/// reinterprets, so a consumer reading them in arrival order can book them as
-/// destruction immediately instead of buffering until end of transaction.
-/// `used_before` is the total destroyed, and the checksum against what the
-/// consumer had tracked under this key.
+/// Emitted when an inventory is uninstalled, ahead of the burns it accounts for.
+/// `used_before` is the volume destroyed; unlike a bridge-out, none of it
+/// returns to the game.
 public struct InventoryUninstalled has copy, drop {
     entity_id: ID,
     component_id: u64,
@@ -130,10 +119,9 @@ public fun install(
     req
 }
 
-/// Remove the storage component. Aborts if it was never installed. Announces the
-/// teardown with `InventoryUninstalled`, then burns the Inventory's balances
-/// (emitting `ItemBurned` per type) so the game client is notified. The marker
-/// goes first: it is what distinguishes those burns from a bridge-out.
+/// Remove the storage component. Aborts if it was never installed. Emits
+/// `InventoryUninstalled`, then burns the Inventory's balances (emitting
+/// `ItemBurned` per type) so the game client is notified.
 public fun uninstall(entity: &mut Entity, component_id: u64, ctx: &mut TxContext): Request {
     assert!(entity.has_component_with_type<Inventory>(component_id), EComponentMissing);
 
@@ -143,7 +131,6 @@ public fun uninstall(entity: &mut Entity, component_id: u64, ctx: &mut TxContext
         inventory_permit(),
         ctx,
     );
-    // Reading the entity is free again now that `uninstall` released its borrow.
     let entity_id = entity.id();
     let inventory = inv_component.unwrap(inventory_permit());
     event::emit(InventoryUninstalled { entity_id, component_id, used_before: inventory.used() });

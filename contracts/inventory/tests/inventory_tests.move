@@ -559,8 +559,7 @@ fun uninstall_burns_inventory() {
     e.complete_request(req);
     assert!(!e.has_component(MODULE_ID));
 
-    // The marker carries the whole `used` total and arrives ahead of the burns it
-    // reinterprets, so those are destruction rather than a bridge-out.
+    // The marker carries the whole `used` total and arrives ahead of the burns.
     let torn_down = event::events_by_type<inventory::InventoryUninstalled>();
     assert!(torn_down.length() == 1);
     let (entity_id, component_id, used_before) = inventory::uninstalled_fields(&torn_down[0]);
@@ -588,16 +587,17 @@ fun reinstall_opens_a_new_epoch_under_the_same_component_id() {
     ts::return_shared(acl);
     configure_default_actions(&mut scenario, e_id, OWNER);
 
+    // First epoch: 100 FUEL at VOL each.
     ts::next_tx(&mut scenario, OWNER);
     let mut e = ts::take_shared_by_id<Entity>(&scenario, e_id);
     let owner_cap = ts::take_from_sender<AccessCap>(&scenario);
     bridge_in(&mut scenario, &mut e, &owner_cap, b"bridge_in", FUEL, 100, VOL);
+    assert!(inv(&e).used() == 200);
     ts::return_to_sender(&scenario, owner_cap);
     ts::return_shared(e);
 
-    // `component_id` is caller-chosen and reusable, so the same key can host a
-    // second, unrelated inventory. The lifecycle pair is the only thing that
-    // separates the two: a fresh bag, and a capacity of its own.
+    // The seam: one tx closes the first epoch and opens the second under the
+    // same key, so both events are the only thing telling them apart.
     ts::next_tx(&mut scenario, ADMIN);
     let mut e = ts::take_shared_by_id<Entity>(&scenario, e_id);
     let acl = take_acl(&scenario);
@@ -616,18 +616,35 @@ fun reinstall_opens_a_new_epoch_under_the_same_component_id() {
     admin_service::verify_admin(&mut req, &acl, scenario.ctx());
     e.complete_request(req);
 
+    let torn_down = event::events_by_type<inventory::InventoryUninstalled>();
+    assert!(torn_down.length() == 1);
+    let (torn_entity, torn_component, used_before) = inventory::uninstalled_fields(&torn_down[0]);
+    assert!(torn_entity == e_id && torn_component == MODULE_ID);
+    assert!(used_before == 200);
+
+    let installed = event::events_by_type<inventory::InventoryInstalled>();
+    assert!(installed.length() == 1);
+    let (new_entity, new_component, _, _, capacity) = inventory::installed_fields(&installed[0]);
+    assert!(new_entity == e_id && new_component == MODULE_ID);
+    assert!(capacity == 500);
+
     assert!(inv(&e).capacity() == 500);
     assert!(inv(&e).used() == 0);
     assert!(inventory::balance_of(&e, MODULE_ID, FUEL) == 0);
-
-    assert!(event::events_by_type<inventory::InventoryUninstalled>().length() == 1);
-    let installed = event::events_by_type<inventory::InventoryInstalled>();
-    assert!(installed.length() == 1);
-    let (entity_id, component_id, _, _, capacity) = inventory::installed_fields(&installed[0]);
-    assert!(entity_id == e_id && component_id == MODULE_ID);
-    assert!(capacity == 500);
-
     ts::return_shared(acl);
     ts::return_shared(e);
+
+    // Second epoch: its own items, under the key the first one used. The FUEL
+    // balance does not carry across.
+    ts::next_tx(&mut scenario, OWNER);
+    let mut e = ts::take_shared_by_id<Entity>(&scenario, e_id);
+    let owner_cap = ts::take_from_sender<AccessCap>(&scenario);
+    bridge_in(&mut scenario, &mut e, &owner_cap, b"bridge_in", LENS, 50, VOL);
+    assert!(inventory::balance_of(&e, MODULE_ID, LENS) == 50);
+    assert!(inventory::balance_of(&e, MODULE_ID, FUEL) == 0);
+    assert!(inv(&e).used() == 100);
+    ts::return_to_sender(&scenario, owner_cap);
+    ts::return_shared(e);
+
     scenario.end();
 }
