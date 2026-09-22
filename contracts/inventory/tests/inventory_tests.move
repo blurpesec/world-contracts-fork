@@ -11,9 +11,9 @@ use core::{
     requirement::Requirement,
     test_helpers::{claim, setup, take_acl, take_registry}
 };
-use inventory::{inventory, item::Item};
+use inventory::{inventory, item::{Self, Item}};
 use std::string::{Self, String};
-use sui::test_scenario as ts;
+use sui::{event, test_scenario as ts};
 
 const ADMIN: address = @0xA;
 const OWNER: address = @0xB;
@@ -236,6 +236,17 @@ fun install_reports_component_and_capacity() {
     assert!(inv(&e).capacity() == 1000);
     assert!(inv(&e).used() == 0);
 
+    let installed = event::events_by_type<inventory::InventoryInstalled>();
+    assert!(installed.length() == 1);
+    let (entity_id, component_id, inventory_type_id, name, capacity) = inventory::installed_fields(
+        &installed[0],
+    );
+    assert!(entity_id == e.id());
+    assert!(component_id == MODULE_ID);
+    assert!(inventory_type_id == TYPE_ID);
+    assert!(name == option::some(unit_name()));
+    assert!(capacity == 1000);
+
     e.share();
     ts::return_shared(acl);
     ts::return_shared(registry);
@@ -278,6 +289,14 @@ fun install_two_inventories_on_one_entity() {
     assert!(e.has_component(MODULE_ID_2));
     assert!(inventory::inventory(&e, MODULE_ID).capacity() == 1000);
     assert!(inventory::inventory(&e, MODULE_ID_2).capacity() == 500);
+
+    let installed = event::events_by_type<inventory::InventoryInstalled>();
+    assert!(installed.length() == 2);
+    let (entity_a, component_a, _, _, capacity_a) = inventory::installed_fields(&installed[0]);
+    let (entity_b, component_b, _, _, capacity_b) = inventory::installed_fields(&installed[1]);
+    assert!(entity_a == entity_b);
+    assert!(component_a == MODULE_ID && capacity_a == 1000);
+    assert!(component_b == MODULE_ID_2 && capacity_b == 500);
 
     e.share();
     ts::return_shared(acl);
@@ -539,6 +558,74 @@ fun uninstall_burns_inventory() {
     admin_service::verify_admin(&mut req, &acl, scenario.ctx());
     e.complete_request(req);
     assert!(!e.has_component(MODULE_ID));
+
+    // The marker carries the whole `used` total and arrives ahead of the burns it
+    // reinterprets, so those are destruction rather than a bridge-out.
+    let torn_down = event::events_by_type<inventory::InventoryUninstalled>();
+    assert!(torn_down.length() == 1);
+    let (entity_id, component_id, used_before) = inventory::uninstalled_fields(&torn_down[0]);
+    assert!(entity_id == e_id && component_id == MODULE_ID);
+    assert!(used_before == 200);
+    assert!(event::events_by_type<item::ItemBurned>().length() == 1);
+
+    ts::return_shared(acl);
+    ts::return_shared(e);
+    scenario.end();
+}
+
+#[test]
+fun reinstall_opens_a_new_epoch_under_the_same_component_id() {
+    let mut scenario = ts::begin(ADMIN);
+    setup(&mut scenario);
+
+    ts::next_tx(&mut scenario, ADMIN);
+    let mut registry = take_registry(&scenario);
+    let acl = take_acl(&scenario);
+    let e = build_entity_with_inventory(&mut scenario, &mut registry, &acl, 1, OWNER, 1000);
+    let e_id = e.id();
+    e.share();
+    ts::return_shared(registry);
+    ts::return_shared(acl);
+    configure_default_actions(&mut scenario, e_id, OWNER);
+
+    ts::next_tx(&mut scenario, OWNER);
+    let mut e = ts::take_shared_by_id<Entity>(&scenario, e_id);
+    let owner_cap = ts::take_from_sender<AccessCap>(&scenario);
+    bridge_in(&mut scenario, &mut e, &owner_cap, b"bridge_in", FUEL, 100, VOL);
+    ts::return_to_sender(&scenario, owner_cap);
+    ts::return_shared(e);
+
+    // `component_id` is caller-chosen and reusable, so the same key can host a
+    // second, unrelated inventory. The lifecycle pair is the only thing that
+    // separates the two: a fresh bag, and a capacity of its own.
+    ts::next_tx(&mut scenario, ADMIN);
+    let mut e = ts::take_shared_by_id<Entity>(&scenario, e_id);
+    let acl = take_acl(&scenario);
+    let mut req = inventory::uninstall(&mut e, MODULE_ID, scenario.ctx());
+    admin_service::verify_admin(&mut req, &acl, scenario.ctx());
+    e.complete_request(req);
+
+    let mut req = inventory::install(
+        &mut e,
+        MODULE_ID,
+        TYPE_ID,
+        option::some(string::utf8(b"SU-01b")),
+        500,
+        scenario.ctx(),
+    );
+    admin_service::verify_admin(&mut req, &acl, scenario.ctx());
+    e.complete_request(req);
+
+    assert!(inv(&e).capacity() == 500);
+    assert!(inv(&e).used() == 0);
+    assert!(inventory::balance_of(&e, MODULE_ID, FUEL) == 0);
+
+    assert!(event::events_by_type<inventory::InventoryUninstalled>().length() == 1);
+    let installed = event::events_by_type<inventory::InventoryInstalled>();
+    assert!(installed.length() == 1);
+    let (entity_id, component_id, _, _, capacity) = inventory::installed_fields(&installed[0]);
+    assert!(entity_id == e_id && component_id == MODULE_ID);
+    assert!(capacity == 500);
 
     ts::return_shared(acl);
     ts::return_shared(e);

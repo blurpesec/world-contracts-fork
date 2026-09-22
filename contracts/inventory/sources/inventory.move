@@ -22,7 +22,7 @@ use core::{
 };
 use inventory::item::{Self, Item, ItemBag};
 use std::{internal::Permit, string::String};
-use sui::bcs;
+use sui::{bcs, event};
 
 // === Errors ===
 
@@ -67,6 +67,36 @@ public struct Withdrawal(ItemRequirement) has drop;
 
 // === Events ===
 
+/// An inventory now exists at `(entity_id, component_id)` and will hold balances
+/// until `InventoryUninstalled`. `capacity` and the inventory's own kind are set
+/// here and reach the wire nowhere else, so nothing downstream can size an
+/// inventory — or even know an as-yet-unused one exists — until this is emitted.
+/// Because `component_id` is caller-chosen and reusable, the pair also separates
+/// one inventory from the next under the same key: an uninstall-then-reinstall is
+/// a *different* inventory, with a fresh bag and possibly a different capacity.
+/// `inventory_type_id` reads `Inventory.type_id` — the inventory's own kind,
+/// never an item type; it is named apart so `type_id` means one thing on the wire.
+public struct InventoryInstalled has copy, drop {
+    entity_id: ID,
+    component_id: u64,
+    inventory_type_id: u64,
+    name: Option<String>,
+    capacity: u64,
+}
+
+/// `uninstall` dropped the whole inventory: every balance under this
+/// `(entity_id, component_id)` ceased to exist, and unlike a bridge `ItemBurned`
+/// none of it returned to the game. Emitted *before* the per-type burns it
+/// reinterprets, so a consumer reading them in arrival order can book them as
+/// destruction immediately instead of buffering until end of transaction.
+/// `used_before` is the total destroyed, and the checksum against what the
+/// consumer had tracked under this key.
+public struct InventoryUninstalled has copy, drop {
+    entity_id: ID,
+    component_id: u64,
+    used_before: u64,
+}
+
 // === Public Functions ===
 
 /// Build and install the storage component under `component_id` with the
@@ -80,20 +110,30 @@ public fun install(
     capacity: u64,
     ctx: &mut TxContext,
 ): Request {
+    let entity_id = entity.id();
     let inventory = Inventory { type_id, capacity, used: 0, items: item::new_bag(ctx) };
-    entity.install(
+    let req = entity.install(
         component_id,
         name,
         inventory,
         VERSION,
         inventory_permit(),
         ctx,
-    )
+    );
+    event::emit(InventoryInstalled {
+        entity_id,
+        component_id,
+        inventory_type_id: type_id,
+        name,
+        capacity,
+    });
+    req
 }
 
-/// Remove the storage component. Aborts if it was never installed. Burns the
-/// Inventory's balances (emitting `ItemBurned` per type) so the game client is
-/// notified.
+/// Remove the storage component. Aborts if it was never installed. Announces the
+/// teardown with `InventoryUninstalled`, then burns the Inventory's balances
+/// (emitting `ItemBurned` per type) so the game client is notified. The marker
+/// goes first: it is what distinguishes those burns from a bridge-out.
 public fun uninstall(entity: &mut Entity, component_id: u64, ctx: &mut TxContext): Request {
     assert!(entity.has_component_with_type<Inventory>(component_id), EComponentMissing);
 
@@ -103,7 +143,10 @@ public fun uninstall(entity: &mut Entity, component_id: u64, ctx: &mut TxContext
         inventory_permit(),
         ctx,
     );
+    // Reading the entity is free again now that `uninstall` released its borrow.
+    let entity_id = entity.id();
     let inventory = inv_component.unwrap(inventory_permit());
+    event::emit(InventoryUninstalled { entity_id, component_id, used_before: inventory.used() });
     burn_inventory(inventory, tenant);
     req
 }
@@ -348,4 +391,18 @@ fun deposit_permit(): Permit<Deposit> {
 
 fun withdrawal_permit(): Permit<Withdrawal> {
     internal::permit<Withdrawal>()
+}
+
+// === Test Functions ===
+
+/// `(entity_id, component_id, inventory_type_id, name, capacity)`.
+#[test_only]
+public fun installed_fields(e: &InventoryInstalled): (ID, u64, u64, Option<String>, u64) {
+    (e.entity_id, e.component_id, e.inventory_type_id, e.name, e.capacity)
+}
+
+/// `(entity_id, component_id, used_before)`.
+#[test_only]
+public fun uninstalled_fields(e: &InventoryUninstalled): (ID, u64, u64) {
+    (e.entity_id, e.component_id, e.used_before)
 }
