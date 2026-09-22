@@ -26,11 +26,6 @@ fun withdraw_item(
     item::withdraw(bag, key, quantity, ctx)
 }
 
-/// Empty a bag the way teardown does.
-fun drop_bag(bag: item::ItemBag) {
-    item::burn_all_and_destroy(bag);
-}
-
 #[test]
 fun bag_mint_adds_balance() {
     let mut scenario = ts::begin(@0xA);
@@ -39,12 +34,12 @@ fun bag_mint_adds_balance() {
     item::mint(&mut bag, fuel_key(), 25, VOL);
     assert!(item::balance(&bag, FUEL) == 25);
 
-    drop_bag(bag);
+    item::destroy_bag(bag);
     scenario.end();
 }
 
 #[test]
-fun burn_all_drains_every_balance() {
+fun destroy_bag_drops_a_populated_bag() {
     let mut scenario = ts::begin(@0xA);
     let mut bag = item::new_bag(scenario.ctx());
 
@@ -53,9 +48,8 @@ fun burn_all_drains_every_balance() {
     assert!(item::balance(&bag, FUEL) == 50);
     assert!(item::balance(&bag, LENS) == 3);
 
-    // Every type is popped, not just the first: the table has to be empty before
-    // `destroy_empty`, which is what keeps the dynamic fields from leaking.
-    item::burn_all_and_destroy(bag);
+    // Takes the bag however full it is, in one step and with no events.
+    item::destroy_bag(bag);
 
     scenario.end();
 }
@@ -77,7 +71,7 @@ fun bag_deposit_merges_by_type() {
     assert!(item::balance(&bag, FUEL) == 35);
 
     item::destroy_for_testing(out);
-    drop_bag(bag);
+    item::destroy_bag(bag);
     scenario.end();
 }
 
@@ -90,7 +84,7 @@ fun withdraw_records_fields() {
     assert!(fuel.quantity() == 50);
     assert!(fuel.volume() == VOL);
     item::destroy_for_testing(fuel);
-    drop_bag(bag);
+    item::destroy_bag(bag);
     scenario.end();
 }
 
@@ -110,7 +104,7 @@ fun withdraw_mints_a_fresh_transit_id() {
     item::deposit(&mut bag, b);
     assert!(item::balance(&bag, FUEL) == 100);
 
-    drop_bag(bag);
+    item::destroy_bag(bag);
     scenario.end();
 }
 
