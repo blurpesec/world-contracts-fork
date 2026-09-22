@@ -108,6 +108,35 @@ fun withdraw_mints_a_fresh_transit_id() {
     scenario.end();
 }
 
+#[test]
+fun split_and_merge() {
+    let mut scenario = ts::begin(@0xA);
+    let mut bag = item::new_bag(scenario.ctx());
+    let mut a = withdraw_item(&mut bag, fuel_key(), 100, scenario.ctx());
+    let b = item::split(&mut a, 40, scenario.ctx());
+    assert!(a.quantity() == 60);
+    assert!(b.quantity() == 40);
+    assert!(b.volume() == VOL);
+
+    item::merge(&mut a, b);
+    assert!(a.quantity() == 100);
+
+    item::destroy_for_testing(a);
+    item::destroy_bag(bag);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = item::EWrongType)]
+fun merge_wrong_type_aborts() {
+    let mut scenario = ts::begin(@0xA);
+    let mut bag = item::new_bag(scenario.ctx());
+    let mut a = withdraw_item(&mut bag, fuel_key(), 10, scenario.ctx());
+    let b = withdraw_item(&mut bag, lens_key(), 10, scenario.ctx());
+    item::merge(&mut a, b);
+
+    abort
+}
+
 #[test, expected_failure(abort_code = item::EInsufficientQuantity)]
 fun withdraw_over_balance_aborts() {
     let mut scenario = ts::begin(@0xA);
