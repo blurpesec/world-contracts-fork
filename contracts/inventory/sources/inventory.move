@@ -51,6 +51,13 @@ const ERequirementNotComponentScoped: vector<u8> = b"Requirement is not componen
 
 const VERSION: u64 = 1;
 
+/// Most balances one `ItemsDestroyed` carries. A `DestroyedBalance` is 24 bytes
+/// of BCS, so a full batch is ~24 KB against Sui's 256 KB `max_event_emit_size`,
+/// leaving the header (entity id, tenant, ids) ample room. Teardown emits
+/// `1 + ceil(n / DESTROYED_BATCH_SIZE)` events, far inside the 1024-per-tx
+/// `max_num_event_emit` for any inventory one transaction can drain.
+const DESTROYED_BATCH_SIZE: u64 = 1000;
+
 // === Structs ===
 
 /// One balance area with its own volume cap; the component's inner state.
@@ -91,9 +98,9 @@ public struct ItemMinted has copy, drop {
 }
 
 /// Chain to game: `chain_item_to_game_inventory` removed this balance, which
-/// reappears in the game's own container. `uninstall` also emits one per type,
-/// after `InventoryUninstalled`, for balances it destroys rather than returns to
-/// the game: each with `balance_after` 0 and `used_after` the volume still left.
+/// reappears in the game's own container. Only ever the bridge, so supply is
+/// conserved across the boundary on every row: `uninstall` destroys balances
+/// outright and reports them as `ItemsDestroyed` instead.
 public struct ItemBurned has copy, drop {
     entity_id: ID,
     tenant: String,
@@ -148,14 +155,40 @@ public struct InventoryInstalled has copy, drop {
     capacity: u64,
 }
 
-/// Emitted when an inventory is uninstalled, ahead of the burns it accounts for.
-/// `used_before` is the volume destroyed; unlike a bridge-out, none of it
-/// returns to the game.
+/// One balance `uninstall` destroyed: `quantity` units of `type_id` at
+/// per-unit `volume`.
+public struct DestroyedBalance has copy, drop, store {
+    type_id: u64,
+    quantity: u64,
+    volume: u64,
+}
+
+/// `uninstall` dropped the whole inventory: every balance under this
+/// `(entity_id, component_id)` ceased to exist, and none of it returned to the
+/// game. Emitted first, ahead of the `batch_count` `ItemsDestroyed` events in
+/// the same transaction that list those balances (`balance_count` in all), so a
+/// consumer knows the teardown is complete once it has seen them. `used_before`
+/// is the total volume destroyed, the sum of `quantity * volume` over every
+/// batch.
 public struct InventoryUninstalled has copy, drop {
     entity_id: ID,
     tenant: String,
     component_id: u64,
     used_before: u64,
+    balance_count: u64,
+    batch_count: u64,
+}
+
+/// One batch of the balances an `uninstall` destroyed, at most
+/// `DESTROYED_BATCH_SIZE` of them. `batch_index` runs `0..batch_count` of the
+/// `InventoryUninstalled` emitted just before, in order. Destruction gets its
+/// own event so `ItemBurned` stays exclusively the bridge-out.
+public struct ItemsDestroyed has copy, drop {
+    entity_id: ID,
+    tenant: String,
+    component_id: u64,
+    batch_index: u64,
+    balances: vector<DestroyedBalance>,
 }
 
 /// The inventory at `component_id` moved from `from_entity_id` to
@@ -226,9 +259,10 @@ public fun install(
     req
 }
 
-/// Remove the storage component and disconnect it from the power grid. Aborts if it was never
-/// installed. Emits `InventoryUninstalled`, then burns the Inventory's balances
-/// (emitting `ItemBurned` per type) so the game client is notified.
+/// Remove the storage component and disconnect it from the power grid. Aborts
+/// if it was never installed. Destroys every balance, deleting each one's
+/// storage, and reports them to the game client: one `InventoryUninstalled`,
+/// then the balances in batches of `ItemsDestroyed`.
 public fun uninstall(
     entity: &mut Entity,
     component_id: u64,
@@ -247,13 +281,7 @@ public fun uninstall(
     let entity_id = entity.id();
     let tenant = entity.key().tenant();
     let inventory = inv_component.unwrap(inventory_permit());
-    event::emit(InventoryUninstalled {
-        entity_id,
-        tenant,
-        component_id,
-        used_before: inventory.used(),
-    });
-    burn_inventory(inventory, entity_id, tenant, component_id);
+    destroy_inventory(inventory, entity_id, tenant, component_id, DESTROYED_BATCH_SIZE);
     req
 }
 
@@ -583,22 +611,38 @@ fun withdraw_item(
     item
 }
 
-/// Burn every balance, one `ItemBurned` per type, counting `used_after` down to
-/// 0 on the last.
-fun burn_inventory(inv: Inventory, entity_id: ID, tenant: String, component_id: u64) {
-    let Inventory { items, type_id: _, capacity: _, mut used } = inv;
-    item::burn_all_and_destroy(items).do!(|burned| {
-        let (type_id, quantity, volume) = burned.drained_fields();
-        used = used - quantity * volume;
-        event::emit(ItemBurned {
-            entity_id,
-            tenant,
-            component_id,
-            type_id,
-            quantity,
-            balance_after: 0,
-            used_after: used,
-        });
+/// Drain every balance out of the bag, deleting each one's dynamic field so its
+/// storage rebate is recovered, then announce the teardown and list what died
+/// in batches of `batch_size`, one `ItemsDestroyed` per batch. Batching bounds
+/// both each event's size and how many events teardown emits.
+fun destroy_inventory(
+    inv: Inventory,
+    entity_id: ID,
+    tenant: String,
+    component_id: u64,
+    batch_size: u64,
+) {
+    let Inventory { items, type_id: _, capacity: _, used } = inv;
+    let drained = item::drain_and_destroy(items);
+    let balance_count = drained.length();
+    event::emit(InventoryUninstalled {
+        entity_id,
+        tenant,
+        component_id,
+        used_before: used,
+        balance_count,
+        batch_count: balance_count.div_ceil(batch_size),
+    });
+    let mut balances = vector[];
+    let mut batch_index = 0;
+    balance_count.do!(|i| {
+        let (type_id, quantity, volume) = drained[i].drained_fields();
+        balances.push_back(DestroyedBalance { type_id, quantity, volume });
+        if (balances.length() == batch_size || i + 1 == balance_count) {
+            event::emit(ItemsDestroyed { entity_id, tenant, component_id, batch_index, balances });
+            balances = vector[];
+            batch_index = batch_index + 1;
+        };
     });
 }
 
@@ -701,10 +745,10 @@ public fun installed_fields(e: &InventoryInstalled): (ID, u64, u64, Option<Strin
     (e.entity_id, e.component_id, e.inventory_type_id, e.name, e.capacity)
 }
 
-/// `(entity_id, component_id, used_before)`.
+/// `(entity_id, component_id, used_before, balance_count, batch_count)`.
 #[test_only]
-public fun uninstalled_fields(e: &InventoryUninstalled): (ID, u64, u64) {
-    (e.entity_id, e.component_id, e.used_before)
+public fun uninstalled_fields(e: &InventoryUninstalled): (ID, u64, u64, u64, u64) {
+    (e.entity_id, e.component_id, e.used_before, e.balance_count, e.batch_count)
 }
 
 /// `(from_entity_id, to_entity_id, tenant, component_id, inventory_type_id,
@@ -723,4 +767,59 @@ public fun migrated_fields(
         e.capacity,
         e.used,
     )
+}
+
+/// `(entity_id, component_id, batch_index, balances)`.
+#[test_only]
+public fun items_destroyed_fields(e: &ItemsDestroyed): (ID, u64, u64, vector<DestroyedBalance>) {
+    (e.entity_id, e.component_id, e.batch_index, e.balances)
+}
+
+#[test_only]
+public fun items_destroyed_tenant(e: &ItemsDestroyed): String { e.tenant }
+
+/// `(type_id, quantity, volume)`.
+#[test_only]
+public fun destroyed_balance_fields(b: &DestroyedBalance): (u64, u64, u64) {
+    (b.type_id, b.quantity, b.volume)
+}
+
+#[test_only]
+public fun destroyed_batch_size(): u64 { DESTROYED_BATCH_SIZE }
+
+/// Tear down a bare `items` bag as `uninstall` would, at `batch_size`, so tests
+/// can exercise batch boundaries without filling a real inventory.
+#[test_only]
+public fun destroy_items_for_testing(
+    items: ItemBag,
+    used: u64,
+    entity_id: ID,
+    tenant: String,
+    component_id: u64,
+    batch_size: u64,
+) {
+    let inv = Inventory { type_id: 0, capacity: used, used, items };
+    destroy_inventory(inv, entity_id, tenant, component_id, batch_size);
+}
+
+/// BCS size of a full `ItemsDestroyed` batch under `tenant`, every field at its
+/// widest.
+#[test_only]
+public fun full_batch_bcs_size(tenant: String): u64 {
+    let mut balances = vector[];
+    DESTROYED_BATCH_SIZE.do!(|i| {
+        balances.push_back(DestroyedBalance {
+            type_id: std::u64::max_value!() - i,
+            quantity: std::u64::max_value!(),
+            volume: std::u64::max_value!(),
+        })
+    });
+    let batch = ItemsDestroyed {
+        entity_id: object::id_from_address(@0x0),
+        tenant,
+        component_id: std::u64::max_value!(),
+        batch_index: std::u64::max_value!(),
+        balances,
+    };
+    bcs::to_bytes(&batch).length()
 }

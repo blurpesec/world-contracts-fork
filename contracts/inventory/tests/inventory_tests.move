@@ -7,12 +7,13 @@ use core::{
     admin_service::{Self, AdminACL},
     docking,
     entity::{Self, Entity},
+    entity_key,
     object_registry::ObjectRegistry,
     request::{Self, Request},
     requirement::Requirement,
     test_helpers::{claim, setup, take_acl, take_registry, tenant}
 };
-use inventory::{inventory, item::Item};
+use inventory::{inventory, item::{Self, Item, ItemBag}};
 use power::{grid_fuel, grid_generator, grid_load, power_grid};
 use std::string::{Self, String};
 use sui::{clock::{Self, Clock}, event, test_scenario as ts};
@@ -895,7 +896,7 @@ fun bridge_in_wrong_type_aborts() {
 }
 
 #[test]
-fun uninstall_burns_inventory() {
+fun uninstall_destroys_inventory() {
     let mut scenario = ts::begin(ADMIN);
     setup(&mut scenario);
 
@@ -910,7 +911,8 @@ fun uninstall_burns_inventory() {
     configure_default_actions(&mut scenario, e_id, OWNER);
     power_inventory(&mut scenario, e_id, OWNER);
 
-    bridge_in(&mut scenario, e_id, OWNER, b"bridge_in", FUEL, 100, VOL);
+    bridge_in(&mut scenario, e_id, OWNER, b"bridge_in", FUEL, 100, VOL); // used 200
+    bridge_in(&mut scenario, e_id, OWNER, b"bridge_in", LENS, 10, VOL); // used 220
 
     ts::next_tx(&mut scenario, ADMIN);
     let mut e = ts::take_shared_by_id<Entity>(&scenario, e_id);
@@ -918,29 +920,38 @@ fun uninstall_burns_inventory() {
     uninstall_inventory(&mut scenario, &mut e, &acl, MODULE_ID);
     assert!(!e.has_component(MODULE_ID));
 
-    // The marker carries the whole `used` total and arrives ahead of the burns.
+    // One marker for the whole inventory, then the destroyed balances in
+    // batches: a consumer that missed the bridges still learns which types
+    // died, and 220 is the sum of `quantity * volume` over them.
     let torn_down = event::events_by_type<inventory::InventoryUninstalled>();
     assert!(torn_down.length() == 1);
-    let (entity_id, component_id, used_before) = inventory::uninstalled_fields(&torn_down[0]);
-    assert!(entity_id == e_id && component_id == MODULE_ID);
-    assert!(used_before == 200);
-    assert!(inventory::uninstalled_tenant(&torn_down[0]) == tenant());
-
-    // Each burn names the inventory and counts it down to empty.
-    let burned = event::events_by_type<inventory::ItemBurned>();
-    assert!(burned.length() == 1);
     let (
         entity_id,
         component_id,
-        type_id,
-        quantity,
-        balance_after,
-        used_after,
-    ) = inventory::burned_fields(&burned[0]);
+        used_before,
+        balance_count,
+        batch_count,
+    ) = inventory::uninstalled_fields(&torn_down[0]);
     assert!(entity_id == e_id && component_id == MODULE_ID);
-    assert!(type_id == FUEL && quantity == 100);
-    assert!(balance_after == 0 && used_after == 0);
-    assert!(inventory::burned_tenant(&burned[0]) == tenant());
+    assert!(inventory::uninstalled_tenant(&torn_down[0]) == tenant());
+    assert!(used_before == 220 && balance_count == 2 && batch_count == 1);
+
+    let batches = event::events_by_type<inventory::ItemsDestroyed>();
+    assert!(batches.length() == 1);
+    let (batch_entity, batch_component, batch_index, destroyed) = inventory::items_destroyed_fields(
+        &batches[0],
+    );
+    assert!(batch_entity == e_id && batch_component == MODULE_ID && batch_index == 0);
+    assert!(inventory::items_destroyed_tenant(&batches[0]) == tenant());
+    assert!(destroyed.length() == 2);
+    let (fuel_type, fuel_qty, fuel_vol) = inventory::destroyed_balance_fields(&destroyed[0]);
+    let (lens_type, lens_qty, lens_vol) = inventory::destroyed_balance_fields(&destroyed[1]);
+    assert!(fuel_type == FUEL && fuel_qty == 100 && fuel_vol == VOL);
+    assert!(lens_type == LENS && lens_qty == 10 && lens_vol == VOL);
+
+    // Destruction is not a bridge-out: `ItemBurned` stays exclusively the
+    // chain-to-game row, so a consumer never has to ask which a burn was.
+    assert!(event::events_by_type<inventory::ItemBurned>().is_empty());
 
     ts::return_shared(acl);
     ts::return_shared(e);
@@ -989,7 +1000,9 @@ fun reinstall_opens_a_new_epoch_under_the_same_component_id() {
 
     let torn_down = event::events_by_type<inventory::InventoryUninstalled>();
     assert!(torn_down.length() == 1);
-    let (torn_entity, torn_component, used_before) = inventory::uninstalled_fields(&torn_down[0]);
+    let (torn_entity, torn_component, used_before, _, _) = inventory::uninstalled_fields(
+        &torn_down[0],
+    );
     assert!(torn_entity == e_id && torn_component == MODULE_ID);
     assert!(used_before == 200);
 
@@ -1168,6 +1181,86 @@ fun deposit_at_an_entity_outside_the_docking_aborts() {
     deposit(&mut scenario, &mut z, &z_cap, b"deposit", fuel);
 
     abort
+}
+
+// === Teardown batching ===
+
+/// Mint `count` distinct types into a fresh bag, `qty` of each at `VOL`.
+fun bag_of(scenario: &mut ts::Scenario, count: u64, qty: u64): ItemBag {
+    let mut bag = item::new_bag(scenario.ctx());
+    count.do!(|i| item::mint(&mut bag, entity_key::new(FUEL + i, tenant()), qty, VOL));
+    bag
+}
+
+/// Tear `count` balances down at `batch_size` and check the marker plus each
+/// batch: sizes, in-order indices, and every type accounted for exactly once.
+fun assert_batched_teardown(count: u64, batch_size: u64, expected_sizes: vector<u64>) {
+    let mut scenario = ts::begin(ADMIN);
+    let e_id = object::id_from_address(@0xE);
+    let bag = bag_of(&mut scenario, count, 3);
+    inventory::destroy_items_for_testing(
+        bag,
+        count * 3 * VOL,
+        e_id,
+        tenant(),
+        MODULE_ID,
+        batch_size,
+    );
+
+    let torn_down = event::events_by_type<inventory::InventoryUninstalled>();
+    assert!(torn_down.length() == 1);
+    let (_, _, used_before, balance_count, batch_count) = inventory::uninstalled_fields(
+        &torn_down[0],
+    );
+    assert!(used_before == count * 3 * VOL);
+    assert!(balance_count == count && batch_count == expected_sizes.length());
+
+    let batches = event::events_by_type<inventory::ItemsDestroyed>();
+    assert!(batches.length() == expected_sizes.length());
+    let mut next_type = FUEL;
+    batches.length().do!(|i| {
+        let (entity_id, component_id, batch_index, balances) = inventory::items_destroyed_fields(
+            &batches[i],
+        );
+        assert!(entity_id == e_id && component_id == MODULE_ID && batch_index == i);
+        assert!(balances.length() == expected_sizes[i]);
+        balances.do_ref!(|b| {
+            let (type_id, quantity, volume) = inventory::destroyed_balance_fields(b);
+            assert!(type_id == next_type && quantity == 3 && volume == VOL);
+            next_type = next_type + 1;
+        });
+    });
+    assert!(next_type == FUEL + count);
+    scenario.end();
+}
+
+#[test]
+fun teardown_splits_a_partial_last_batch() {
+    assert_batched_teardown(5, 2, vector[2, 2, 1]);
+}
+
+#[test]
+fun teardown_fills_batches_exactly() {
+    assert_batched_teardown(4, 2, vector[2, 2]);
+}
+
+#[test]
+fun teardown_of_an_empty_inventory_emits_only_the_marker() {
+    assert_batched_teardown(0, 2, vector[]);
+}
+
+#[test]
+fun teardown_under_one_batch_emits_one() {
+    assert_batched_teardown(3, inventory::destroyed_batch_size(), vector[3]);
+}
+
+/// A full batch with every field at its widest, under a 4 KB tenant, still
+/// fits Sui's 256 KB `max_event_emit_size`.
+#[test]
+fun full_batch_fits_the_event_size_limit() {
+    let mut long_tenant = vector[];
+    4096u64.do!(|_| long_tenant.push_back(b"x"[0]));
+    assert!(inventory::full_batch_bcs_size(string::utf8(long_tenant)) < 256_000);
 }
 
 /// Docking proves where an `Item` came from, not that its source shares the
