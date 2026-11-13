@@ -61,7 +61,7 @@ public struct ItemBag has store {
     balances: LinkedTable<u64, Balance>,
 }
 
-/// One balance `burn_all_and_destroy` removed, handed back for the caller to
+/// One balance `drain_and_destroy` removed, handed back for the caller to
 /// announce: `quantity` of `type_id` at per-unit `volume`.
 public struct DrainedBalance has copy, drop {
     type_id: u64,
@@ -113,12 +113,6 @@ public(package) fun new_bag(ctx: &mut TxContext): ItemBag {
     ItemBag { balances: linked_table::new(ctx) }
 }
 
-/// Drop a bag and all its balances without emitting burn events.
-public(package) fun destroy_bag(bag: ItemBag) {
-    let ItemBag { balances } = bag;
-    linked_table::drop(balances);
-}
-
 /// Mint `quantity` of `game_id` into `bag` at `volume` (game-to-chain bridge).
 public(package) fun mint(bag: &mut ItemBag, game_id: EntityKey, quantity: u64, volume: u64) {
     let type_id = entity_key::id(&game_id);
@@ -133,9 +127,9 @@ public(package) fun burn(bag: &mut ItemBag, game_id: EntityKey, quantity: u64) {
     subtract_balance(bag, type_id, quantity);
 }
 
-/// Burn every balance in `bag`, then destroy it. Returns one entry per type
-/// burned, for the caller to announce.
-public(package) fun burn_all_and_destroy(bag: ItemBag): vector<DrainedBalance> {
+/// Remove every balance from `bag`, deleting each one's dynamic field, then
+/// destroy it. Returns one entry per type removed, for the caller to announce.
+public(package) fun drain_and_destroy(bag: ItemBag): vector<DrainedBalance> {
     let ItemBag { mut balances } = bag;
     let mut drained = vector[];
     while (!balances.is_empty()) {
@@ -217,6 +211,15 @@ fun subtract_balance(bag: &mut ItemBag, type_id: u64, quantity: u64) {
 }
 
 // === Test Functions ===
+
+/// Drop a bag and all its balances in one step. Tests only: it deletes just the
+/// table's own UID, leaving every balance behind as an unreachable dynamic
+/// field, so production teardown drains with `drain_and_destroy` instead.
+#[test_only]
+public fun destroy_bag(bag: ItemBag) {
+    let ItemBag { balances } = bag;
+    linked_table::drop(balances);
+}
 
 /// Dispose of an in-transit `Item`. Tests only: production has exactly one exit
 /// for an `Item` — `inventory::deposit` — and a withdrawal with no valid
