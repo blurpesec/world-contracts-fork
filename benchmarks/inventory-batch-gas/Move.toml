@@ -1,0 +1,13 @@
+[package]
+name = "inventory_batch_gas"
+edition = "2024"
+
+[dependencies]
+core = { local = "../../contracts/core" }
+power = { local = "../../contracts/power" }
+inventory = { local = "../../contracts/inventory" }
+
+[environments]
+dev = "4c78adac"
+test = "4c78adac"
+uat = "4c78adac"
