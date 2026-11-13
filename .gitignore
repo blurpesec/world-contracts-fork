@@ -21,6 +21,7 @@ deployments/**
 !deployments/*/
 !deployments/*/world.json
 deployments/localnet/world.json
+deployments/localnet-adr/world.json
 .env
 
 # docs

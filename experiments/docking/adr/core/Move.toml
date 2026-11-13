@@ -1,0 +1,9 @@
+# ADR-0004 prototype: contracts/core with the ADR applied. See experiments/docking/README.md.
+[package]
+name = "adr_core"
+edition = "2024"
+
+[environments]
+dev = "4c78adac"
+test = "4c78adac"
+uat = "4c78adac"

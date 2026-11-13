@@ -1,0 +1,12 @@
+# ADR-0004 prototype: contracts/inventory with the ADR applied. See experiments/docking/README.md.
+[package]
+name = "adr_inventory"
+edition = "2024"
+
+[dependencies]
+adr_core = { local = "../core" }
+
+[environments]
+dev = "4c78adac"
+test = "4c78adac"
+uat = "4c78adac"
