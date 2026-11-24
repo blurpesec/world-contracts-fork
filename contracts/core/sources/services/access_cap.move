@@ -10,6 +10,12 @@
 /// that entity's own cap. The borrow yields a non-droppable `ReturnReceipt` that
 /// must be consumed by `return_to` (put it back) or, for a transferable cap,
 /// `transfer_with_receipt` (relocate it to another entity).
+///
+/// A cap can also be parked on any other object, such as a DAO or a builder
+/// contract's config, and `borrow_parked` by the module that defines that
+/// object. That module decides who may use the cap and for what. The same
+/// `ReturnReceipt` forces the cap back before the transaction ends, so the cap
+/// still never gains `store`.
 module core::access_cap;
 
 use core::{request::Request, requirement::{Self, Requirement}};
@@ -94,6 +100,24 @@ public fun borrow(
     assert!(entity_cap.entity == origin, ENotOwner);
     let cap = transfer::receive(entity_uid, ticket);
     let receipt = ReturnReceipt { origin, cap_id: object::id(&cap) };
+    (cap, receipt)
+}
+
+/// Borrow an `AccessCap` parked on any object. Only the module that defines
+/// `parent`'s type can produce its `&mut UID`, so holding it proves control
+/// of the parent. That module's own rules (a member list, a vote, a fixed set
+/// of upkeep calls) are what gate the cap. `Entity` never hands out its
+/// `&mut UID`, so caps parked on an entity still need `entity::borrow_access`.
+///
+/// The parent's module must not return the cap or the receipt to its caller:
+/// whoever holds them can use the cap for anything in that transaction, and
+/// can relocate a transferable cap with `transfer_with_receipt`.
+public fun borrow_parked(
+    parent: &mut UID,
+    ticket: Receiving<AccessCap>,
+): (AccessCap, ReturnReceipt) {
+    let cap = transfer::receive(parent, ticket);
+    let receipt = ReturnReceipt { origin: parent.to_inner(), cap_id: object::id(&cap) };
     (cap, receipt)
 }
 

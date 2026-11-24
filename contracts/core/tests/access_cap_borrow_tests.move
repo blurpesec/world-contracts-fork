@@ -3,14 +3,51 @@ module core::access_cap_borrow_tests;
 
 use core::{
     access_cap::{Self, AccessCap},
+    action,
     admin_service,
     entity::{Self, Entity},
     test_helpers::{setup, take_acl, create_entity}
 };
-use sui::test_scenario as ts;
+use std::string;
+use sui::{test_scenario as ts, transfer::Receiving, vec_set::{Self, VecSet}};
 
 const ADMIN: address = @0xA;
 const OWNER: address = @0xB;
+const MEMBER: address = @0xC;
+
+const ENotMember: u64 = 100;
+
+/// A stand-in for a builder's DAO: a non-entity object that holds an entity's
+/// cap and lets its members enable actions with it.
+public struct Dao has key {
+    id: UID,
+    members: VecSet<address>,
+}
+
+fun create_dao(scenario: &mut ts::Scenario, members: vector<address>): ID {
+    ts::next_tx(scenario, ADMIN);
+    let dao = Dao { id: object::new(scenario.ctx()), members: vec_set::from_keys(members) };
+    let dao_id = object::id(&dao);
+    transfer::share_object(dao);
+    dao_id
+}
+
+/// The DAO's own rule: only a member may enable an action on the entity whose
+/// cap the DAO holds. The cap never leaves this function.
+fun dao_enable_action(
+    dao: &mut Dao,
+    e: &mut Entity,
+    ticket: Receiving<AccessCap>,
+    name: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    assert!(dao.members.contains(&ctx.sender()), ENotMember);
+    let (cap, receipt) = access_cap::borrow_parked(&mut dao.id, ticket);
+    let mut req = e.enable_action(string::utf8(name), action::new(vector[]), ctx);
+    e.verify_owner(&mut req, &cap);
+    e.complete_request(req);
+    access_cap::return_to(&mut dao.id, cap, receipt);
+}
 
 /// Mint the cap of `entity_id` to `owner` in an ADMIN tx. `owner` may be a plain
 /// address or an entity object address (to park the cap on that entity).
@@ -195,6 +232,75 @@ fun borrow_with_replaced_cap_aborts() {
     let ticket = ts::receiving_ticket_by_id<AccessCap>(su_cap_id);
 
     let (_su_cap, _receipt) = c.borrow_access(&stale_cap, ticket);
+
+    abort
+}
+
+#[test]
+fun dao_member_uses_parked_cap_and_it_returns_to_the_dao() {
+    let mut scenario = ts::begin(ADMIN);
+    setup(&mut scenario);
+    let su = create_entity(&mut scenario, 1);
+    let dao_id = create_dao(&mut scenario, vector[MEMBER]);
+    mint_cap(&mut scenario, su, dao_id.to_address(), true);
+
+    ts::next_tx(&mut scenario, MEMBER);
+    {
+        let cap_id = parked_cap_id(dao_id);
+        let mut dao = ts::take_shared_by_id<Dao>(&scenario, dao_id);
+        let mut e = ts::take_shared_by_id<Entity>(&scenario, su);
+        let ticket = ts::receiving_ticket_by_id<AccessCap>(cap_id);
+        dao_enable_action(&mut dao, &mut e, ticket, b"member_action", scenario.ctx());
+        assert!(e.has_owner_action(string::utf8(b"member_action")));
+        ts::return_shared(e);
+        ts::return_shared(dao);
+    };
+
+    // The cap is parked on the DAO again, and is still the entity's current cap.
+    ts::next_tx(&mut scenario, MEMBER);
+    let cap_id = parked_cap_id(dao_id);
+    let e = ts::take_shared_by_id<Entity>(&scenario, su);
+    assert!(e.access_cap_id() == option::some(cap_id));
+    ts::return_shared(e);
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = ENotMember)]
+fun dao_non_member_cannot_use_parked_cap() {
+    let mut scenario = ts::begin(ADMIN);
+    setup(&mut scenario);
+    let su = create_entity(&mut scenario, 1);
+    let dao_id = create_dao(&mut scenario, vector[MEMBER]);
+    mint_cap(&mut scenario, su, dao_id.to_address(), true);
+
+    ts::next_tx(&mut scenario, OWNER);
+    let cap_id = parked_cap_id(dao_id);
+    let mut dao = ts::take_shared_by_id<Dao>(&scenario, dao_id);
+    let mut e = ts::take_shared_by_id<Entity>(&scenario, su);
+    let ticket = ts::receiving_ticket_by_id<AccessCap>(cap_id);
+    dao_enable_action(&mut dao, &mut e, ticket, b"intruder_action", scenario.ctx());
+
+    abort
+}
+
+#[test, expected_failure(abort_code = access_cap::EReceiptMismatch)]
+fun return_parked_cap_to_another_object_aborts() {
+    let mut scenario = ts::begin(ADMIN);
+    setup(&mut scenario);
+    let su = create_entity(&mut scenario, 1);
+    let dao_id = create_dao(&mut scenario, vector[MEMBER]);
+    let other_dao_id = create_dao(&mut scenario, vector[MEMBER]);
+    mint_cap(&mut scenario, su, dao_id.to_address(), true);
+
+    ts::next_tx(&mut scenario, MEMBER);
+    let cap_id = parked_cap_id(dao_id);
+    let mut dao = ts::take_shared_by_id<Dao>(&scenario, dao_id);
+    let mut other = ts::take_shared_by_id<Dao>(&scenario, other_dao_id);
+    let ticket = ts::receiving_ticket_by_id<AccessCap>(cap_id);
+
+    let (cap, receipt) = access_cap::borrow_parked(&mut dao.id, ticket);
+    access_cap::return_to(&mut other.id, cap, receipt);
 
     abort
 }
