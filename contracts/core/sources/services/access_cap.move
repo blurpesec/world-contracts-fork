@@ -10,6 +10,11 @@
 /// that entity's own cap. The borrow yields a non-droppable `ReturnReceipt` that
 /// must be consumed by `return_to` (put it back) or, for a transferable cap,
 /// `transfer_with_receipt` (relocate it to another entity).
+///
+/// An owner can also retire a transferable cap for good with
+/// `entity::hand_over_control`, giving the entity to a contract type instead.
+/// Owner requirements on that entity are then satisfied by
+/// `entity::verify_controller`, and no cap exists to send, park or steal.
 module core::access_cap;
 
 use core::{request::Request, requirement::{Self, Requirement}};
@@ -138,6 +143,25 @@ public(package) fun verify_caller(request: &mut Request, cap: &AccessCap) {
     let (_requirement, frame) = request.take_next(caller_permit());
     request.set_authorized_id(cap.entity);
     frame.destroy_empty_frame();
+}
+
+/// Pop the owner requirement for an entity whose owner is a controller type, not
+/// a cap. Only `entity::verify_controller` calls it, after checking the type.
+public(package) fun verify_controlled(request: &mut Request, entity: ID) {
+    let (_requirement, frame) = request.take_next(permit());
+    assert!(request.entity_id() == option::some(entity), ENotOwner);
+    request.set_authorized_id(entity);
+    frame.destroy_empty_frame();
+}
+
+/// Destroy a transferable cap, returning its id. Only `entity::hand_over_control`
+/// calls it. A soulbound cap can't be handed over.
+public(package) fun destroy(cap: AccessCap): ID {
+    assert!(cap.transferable, ENotTransferable);
+    let AccessCap { id, version: _, entity: _, transferable: _ } = cap;
+    let cap_id = id.to_inner();
+    id.delete();
+    cap_id
 }
 
 /// Pop the owner requirement for `cap`'s entity. Only `entity::verify_owner`
