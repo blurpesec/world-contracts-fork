@@ -8,6 +8,11 @@
 /// `disable_action`, `disable_admin_action`, `interact`, `request_delete`) lock the entity and
 /// return a `Request` the transaction must satisfy. `complete_request` unlocks;
 /// `delete` consumes the object and a `DeleteTicket` minted only by `request_delete`.
+///
+/// An entity is owned either by the holder of its `AccessCap` or, after
+/// `hand_over_control`, by a controller type: the module that defines that type
+/// satisfies owner requirements with `verify_controller`. That lets a contract own
+/// an entity outright (a vault, an escrow, a DAO) without holding or parking a cap.
 module core::entity;
 
 use core::{
@@ -19,7 +24,7 @@ use core::{
     object_registry::ObjectRegistry,
     request::{Self, Request}
 };
-use std::{internal::Permit, string::String};
+use std::{internal::Permit, string::String, type_name::{Self, TypeName}};
 use sui::{
     derived_object,
     dynamic_field as df,
@@ -63,6 +68,8 @@ const ENotDocked: vector<u8> = b"Entity has no docked entities";
 const EWrongSource: vector<u8> = b"Source is neither this entity nor docked with it";
 #[error(code = 16)]
 const ESelfDock: vector<u8> = b"Entity cannot be docked to itself";
+#[error(code = 17)]
+const ENotController: vector<u8> = b"Entity is not controlled by this type";
 
 // === Constants ===
 
@@ -81,6 +88,10 @@ public struct AdminActionsKey() has copy, drop, store;
 
 /// Entities docked with this one, managed with `dock` and `undock`.
 public struct DockedEntitiesKey() has copy, drop, store;
+
+/// Present when a controller type, not an `AccessCap`, owns the entity. Holds
+/// that type's `TypeName` (original ids, so it survives the controller's upgrades).
+public struct ControllerKey() has copy, drop, store;
 
 public struct Entity has key {
     id: UID,
@@ -108,6 +119,18 @@ public struct EntityCreated has copy, drop {
 public struct EntityDeleted has copy, drop {
     entity_id: ID,
     key: EntityKey,
+}
+
+public struct ControlHandedOver has copy, drop {
+    entity_id: ID,
+    /// The retired cap.
+    cap_id: ID,
+    controller: TypeName,
+}
+
+public struct ControlCleared has copy, drop {
+    entity_id: ID,
+    controller: TypeName,
 }
 
 // === Public Functions ===
@@ -156,6 +179,7 @@ public fun mint_access(
     ctx: &mut TxContext,
 ): Request {
     assert!(entity.version == VERSION, EWrongVersion);
+    entity.clear_controller();
     let cap_id = access_cap::mint(entity.id.to_inner(), owner, transferable, ctx);
     entity.access_cap_id = option::some(cap_id);
     entity.lock();
@@ -166,9 +190,11 @@ public fun mint_access(
 }
 
 /// Clear this entity's owner. Admin-gated. Every `AccessCap` minted for it so
-/// far stops verifying; a later `mint_access` sets a new owner.
+/// far stops verifying, and a controller loses control; a later `mint_access`
+/// sets a new owner.
 public fun revoke_access(entity: &mut Entity, _ctx: &mut TxContext): Request {
     assert!(entity.version == VERSION, EWrongVersion);
+    entity.clear_controller();
     entity.access_cap_id = option::none();
     entity.lock();
     request::new(
@@ -183,6 +209,31 @@ public fun verify_owner(entity: &Entity, request: &mut Request, cap: &AccessCap)
     assert!(entity.version == VERSION, EWrongVersion);
     access_cap::verify(request, cap);
     assert!(entity.access_cap_id == option::some(object::id(cap)), EStaleAccessCap);
+}
+
+/// Hand this entity to the module that defines `C`, retiring `cap` for good.
+/// Both sides agree: `cap` is the entity's current, transferable cap (the owner),
+/// and only `C`'s module can mint `Permit<C>` (the controller). `cap` is
+/// destroyed, not sent anywhere. From then on no `AccessCap` verifies for this
+/// entity, and owner requirements are satisfied by `verify_controller<C>`. Admin
+/// `revoke_access` and `mint_access` still apply, and clear the controller.
+public fun hand_over_control<C>(entity: &mut Entity, cap: AccessCap, _: Permit<C>) {
+    assert!(entity.version == VERSION, EWrongVersion);
+    assert!(!entity.is_locked(), ELocked);
+    assert!(entity.access_cap_id == option::some(object::id(&cap)), EStaleAccessCap);
+    let cap_id = access_cap::destroy(cap);
+    entity.access_cap_id = option::none();
+    let controller = type_name::with_original_ids<C>();
+    df::add(&mut entity.id, ControllerKey(), controller);
+    event::emit(ControlHandedOver { entity_id: entity.id.to_inner(), cap_id, controller });
+}
+
+/// Satisfy the next (owner) requirement on a request against this entity as its
+/// controller. Only `C`'s module can mint `Permit<C>`, so only it can call this.
+public fun verify_controller<C>(entity: &Entity, request: &mut Request, _: Permit<C>) {
+    assert!(entity.version == VERSION, EWrongVersion);
+    assert!(entity.controller() == option::some(type_name::with_original_ids<C>()), ENotController);
+    access_cap::verify_controlled(request, entity.id.to_inner());
 }
 
 /// Check the caller's current cap. `entity` may differ from the request target.
@@ -407,6 +458,9 @@ public fun delete(mut entity: Entity, req: Request, ticket: DeleteTicket) {
     let _: VecMap<String, Action> = df::remove(&mut entity.id, OwnerActionsKey());
     let _: VecMap<String, Action> = df::remove(&mut entity.id, AdminActionsKey());
     let _: VecSet<ID> = df::remove(&mut entity.id, DockedEntitiesKey());
+    if (df::exists(&entity.id, ControllerKey())) {
+        let _: TypeName = df::remove(&mut entity.id, ControllerKey());
+    };
     let Entity { id, version: _, key, access_cap_id: _, component_ids: _ } = entity;
     event::emit(EntityDeleted { entity_id: id.to_inner(), key });
     id.delete();
@@ -499,6 +553,12 @@ public fun access_cap_id(entity: &Entity): Option<ID> {
     entity.access_cap_id
 }
 
+/// The controller type that owns this entity, if `hand_over_control` gave it one.
+public fun controller(entity: &Entity): Option<TypeName> {
+    if (df::exists(&entity.id, ControllerKey()))
+        option::some(*df::borrow(&entity.id, ControllerKey())) else option::none()
+}
+
 public fun component_ids(entity: &Entity): vector<u64> {
     *entity.component_ids.keys()
 }
@@ -580,6 +640,12 @@ fun remove_action<K: copy + drop + store>(entity: &mut Entity, key: K, name: Str
     assert!(actions.contains(&name), EUnknownAction);
     let (_, _action) = actions.remove(&name);
     entity.lock();
+}
+
+fun clear_controller(entity: &mut Entity) {
+    if (!df::exists(&entity.id, ControllerKey())) return;
+    let controller: TypeName = df::remove(&mut entity.id, ControllerKey());
+    event::emit(ControlCleared { entity_id: entity.id.to_inner(), controller });
 }
 
 fun lock(entity: &mut Entity) {

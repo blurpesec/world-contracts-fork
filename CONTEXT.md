@@ -52,6 +52,10 @@ These five are the load-bearing nouns of v1. All live in [`contracts/core/source
     (see **Proof**).
   - **Principal** — an Entity that represents an account-like actor and **owns AccessCaps**
     (a Character or a Tribe). See **Keychain**.
+  An Entity's **owner** is either the holder of its `AccessCap`, or a **Controller**: a
+  contract type the owner handed the Entity to with `entity::hand_over_control`, retiring the
+  cap. The controller's module satisfies owner requirements with `entity::verify_controller`
+  (e.g. a vault that anyone may refuel through, but nobody may reconfigure).
 - **Component** — typed state installed on an Entity
   ([`component.move`](contracts/core/sources/component.move)). `Component<T>` wraps a
   user-defined state `T` (e.g. `Component<Inventory>`, `Component<Identity>`) under a
